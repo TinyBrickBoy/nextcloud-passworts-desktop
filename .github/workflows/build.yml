@@ -1,0 +1,77 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Eigener Runner (epyc-runner)
+    runs-on: [self-hosted, Linux, X64, epyc]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux Abhängigkeiten
+        run: |
+          # Auf dem eigenen Runner läuft der Job evtl. als root ohne sudo.
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev xdg-utils file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - run: cargo test --release
+        working-directory: src-tauri
+
+  bundle:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: [self-hosted, Linux, X64, epyc]
+          - name: windows
+            runner: windows-latest
+    name: bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux Abhängigkeiten
+        if: runner.os == 'Linux'
+        run: |
+          # Auf dem eigenen Runner läuft der Job evtl. als root ohne sudo.
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev xdg-utils file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tauri build
+        env:
+          # linuxdeploy ohne FUSE ausführen (eigener Runner, Container)
+          APPIMAGE_EXTRACT_AND_RUN: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: passwords-${{ matrix.name }}
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: ignore

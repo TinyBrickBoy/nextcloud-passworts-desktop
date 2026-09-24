@@ -1,0 +1,5 @@
+# Testvektoren für die Krypto Tests, keine echten Zugangsdaten.
+version: 2
+secret:
+  ignored_paths:
+    - src-tauri/tests/fixtures/
