@@ -9,18 +9,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
+use crate::i18n::t;
+
 pub const BASE_FOLDER: &str = "00000000-0000-0000-0000-000000000000";
 const SESSION_HEADER: &str = "X-API-SESSION";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
-    #[error("Keine Verbindung zum Server ({0})")]
+    #[error("{msg} ({detail})", msg = t("network"), detail = .0)]
     Network(String),
-    #[error("Anmeldung abgelehnt. Bitte neu verbinden.")]
+    #[error("{}", t("unauthorized"))]
     Unauthorized,
     #[error("{0}")]
     Server(String),
-    #[error("Unerwartete Antwort vom Server")]
+    #[error("{}", t("invalid_response"))]
     Invalid,
 }
 
@@ -92,7 +94,7 @@ impl Api {
             let message = serde_json::from_slice::<ErrorBody>(&bytes)
                 .ok()
                 .and_then(|e| e.message)
-                .unwrap_or_else(|| format!("Serverfehler ({})", status.as_u16()));
+                .unwrap_or_else(|| format!("{} ({})", t("server_error"), status.as_u16()));
             return Err(ApiError::Server(message));
         }
         serde_json::from_slice(&bytes).map_err(|_| ApiError::Invalid)
@@ -129,11 +131,60 @@ impl Api {
     }
 
     pub async fn passwords(&self) -> Result<Vec<RawPassword>, ApiError> {
-        self.call(Method::POST, "password/list", Some(json!({ "details": "model" }))).await
+        self.call(Method::POST, "password/list", Some(json!({ "details": "model+tag-ids" }))).await
+    }
+
+    pub async fn trashed_passwords(&self) -> Result<Vec<RawPassword>, ApiError> {
+        let body = json!({ "criteria": { "trashed": true }, "details": "model+tag-ids" });
+        self.call(Method::POST, "password/find", Some(body)).await
+    }
+
+    pub async fn restore_password(&self, id: &str) -> Result<Value, ApiError> {
+        self.call(Method::PATCH, "password/restore", Some(json!({ "id": id }))).await
     }
 
     pub async fn folders(&self) -> Result<Vec<RawFolder>, ApiError> {
         self.call(Method::POST, "folder/list", Some(json!({ "details": "model" }))).await
+    }
+
+    pub async fn create_folder(&self, body: Value) -> Result<Saved, ApiError> {
+        self.call(Method::POST, "folder/create", Some(body)).await
+    }
+
+    pub async fn update_folder(&self, body: Value) -> Result<Saved, ApiError> {
+        self.call(Method::PATCH, "folder/update", Some(body)).await
+    }
+
+    pub async fn delete_folder(&self, id: &str, revision: &str) -> Result<Value, ApiError> {
+        self.call(Method::DELETE, "folder/delete", Some(json!({ "id": id, "revision": revision }))).await
+    }
+
+    pub async fn tags(&self) -> Result<Vec<RawTag>, ApiError> {
+        self.call(Method::POST, "tag/list", Some(json!({ "details": "model" }))).await
+    }
+
+    pub async fn create_tag(&self, body: Value) -> Result<Saved, ApiError> {
+        self.call(Method::POST, "tag/create", Some(body)).await
+    }
+
+    pub async fn delete_tag(&self, id: &str, revision: &str) -> Result<Value, ApiError> {
+        self.call(Method::DELETE, "tag/delete", Some(json!({ "id": id, "revision": revision }))).await
+    }
+
+    /// Favicon als PNG. Der Server begrenzt auf 15 Abrufe in 15 Sekunden.
+    pub async fn favicon(&self, domain: &str, size: u32) -> Result<Vec<u8>, ApiError> {
+        let domain: String = url::form_urlencoded::byte_serialize(domain.as_bytes()).collect();
+        let response = self
+            .http
+            .get(format!("{}/service/favicon/{}/{}", self.base, domain, size))
+            .basic_auth(&self.user, Some(self.app_password.as_str()))
+            .header(header::ACCEPT, "image/png,image/*")
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(ApiError::Server(format!("{} ({})", t("server_error"), response.status().as_u16())));
+        }
+        Ok(response.bytes().await?.to_vec())
     }
 
     pub async fn create_password(&self, body: Value) -> Result<Saved, ApiError> {
@@ -227,7 +278,7 @@ mod tests {
             http_client().unwrap().get("https://ungueltig.invalid/").send().await.unwrap_err()
         });
         let text = ApiError::from(error).to_string();
-        assert!(text.starts_with("Keine Verbindung zum Server ("), "{text}");
+        assert!(text.contains(" ("), "{text}");
         assert!(text.contains(':'), "Ursache fehlt: {text}");
     }
 
@@ -276,12 +327,59 @@ pub struct RawPassword {
     pub editable: bool,
     #[serde(default)]
     pub edited: i64,
+    #[serde(default)]
+    pub created: i64,
+    #[serde(default)]
+    pub trashed: bool,
+    #[serde(default)]
+    pub shared: bool,
+    #[serde(default, deserialize_with = "ids_or_empty")]
+    pub tags: Vec<String>,
+}
+
+/// `+tag-ids` liefert eine Liste von IDs, ältere Server teils Objekte.
+fn ids_or_empty<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    let items = match value {
+        Value::Array(items) => items,
+        Value::Object(map) => map.into_values().collect(),
+        _ => Vec::new(),
+    };
+    Ok(items
+        .into_iter()
+        .filter_map(|item| match item {
+            Value::String(id) => Some(id),
+            Value::Object(obj) => obj.get("id").and_then(|v| v.as_str()).map(String::from),
+            _ => None,
+        })
+        .collect())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawTag {
+    pub id: String,
+    #[serde(default)]
+    pub revision: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub color: String,
+    #[serde(default)]
+    pub cse_type: String,
+    #[serde(default)]
+    pub cse_key: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawFolder {
     pub id: String,
+    #[serde(default)]
+    pub revision: String,
     #[serde(default)]
     pub label: String,
     #[serde(default)]

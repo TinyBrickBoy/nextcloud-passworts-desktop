@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { Globe, LoaderCircle, ExternalLink } from "@lucide/svelte";
   import { api, errorText, type Account } from "./api";
+  import { t } from "./i18n.svelte";
+  import AuthShell from "./components/AuthShell.svelte";
 
   let { onLoggedIn }: { onLoggedIn: (a: Account) => void } = $props();
 
@@ -24,71 +27,102 @@
   }
 </script>
 
-<main class="center">
-  <form class="stack" onsubmit={submit}>
+<AuthShell title="Passwords" subtitle={t("setup_subtitle")}>
+  <form onsubmit={submit}>
     <div>
-      <h1>Passwords</h1>
-      <p class="muted">Mit deiner Nextcloud verbinden</p>
-    </div>
-
-    <div>
-      <label for="server">Server</label>
-      <!-- svelte-ignore a11y_autofocus -->
-      <input id="server" bind:value={server} placeholder="cloud.example.com" autofocus required disabled={waiting} />
+      <label for="server">{t("server")}</label>
+      <div class="with-icon">
+        <Globe size={16} />
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          id="server"
+          bind:value={server}
+          placeholder="cloud.example.com"
+          autofocus
+          required
+          disabled={waiting}
+          spellcheck="false"
+          autocomplete="url"
+        />
+      </div>
     </div>
 
     {#if manual}
       <div>
-        <label for="user">Benutzername</label>
-        <input id="user" bind:value={user} required disabled={waiting} autocomplete="off" />
+        <label for="user">{t("username")}</label>
+        <input id="user" bind:value={user} required disabled={waiting} autocomplete="username" spellcheck="false" />
       </div>
       <div>
-        <label for="apppw">App Passwort</label>
+        <label for="apppw">{t("app_password")}</label>
         <input id="apppw" type="password" bind:value={appPassword} required disabled={waiting} />
-        <p class="hint muted">Anlegen unter Einstellungen → Sicherheit → Geräte &amp; Sitzungen</p>
+        <p class="hint muted">{t("app_password_hint")}</p>
       </div>
     {/if}
 
     {#if waiting && !manual}
-      <p class="muted">Bitte bestätige die Anmeldung im Browser …</p>
-      <button type="button" onclick={() => api.loginCancel()}>Abbrechen</button>
+      <div class="waiting">
+        <LoaderCircle size={16} class="spin" />
+        <span>{t("waiting_for_browser")}</span>
+      </div>
+      <button type="button" onclick={() => api.loginCancel()}>{t("cancel")}</button>
     {:else}
       <button class="primary" type="submit" disabled={waiting}>
-        {manual ? "Verbinden" : "Im Browser anmelden"}
-      </button>
-      <button type="button" class="ghost muted" onclick={() => (manual = !manual)} disabled={waiting}>
-        {manual ? "Im Browser anmelden" : "Mit App Passwort anmelden"}
+        {#if waiting}<LoaderCircle size={16} class="spin" />{:else if !manual}<ExternalLink size={16} />{/if}
+        {manual ? t("connect") : t("login_browser")}
       </button>
     {/if}
 
     {#if error}<p class="error">{error}</p>{/if}
   </form>
-</main>
+
+  <button type="button" class="ghost switch" onclick={() => (manual = !manual)} disabled={waiting}>
+    {manual ? t("login_browser_instead") : t("login_app_password")}
+  </button>
+</AuthShell>
 
 <style>
-  .center {
-    height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-  }
-  .stack {
-    width: 100%;
-    max-width: 320px;
+  form {
     display: flex;
     flex-direction: column;
     gap: 14px;
   }
-  h1 {
-    margin: 0;
-    font-size: 22px;
-    font-weight: 600;
+  .with-icon {
+    position: relative;
   }
-  p {
-    margin: 2px 0 0;
+  .with-icon :global(svg) {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+  .with-icon input {
+    padding-left: 36px;
   }
   .hint {
+    margin: 6px 0 0;
     font-size: 12px;
-    margin-top: 6px;
+  }
+  .waiting {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+  }
+  .switch {
+    align-self: center;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    margin-top: -6px;
+  }
+  :global(.spin) {
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes -global-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

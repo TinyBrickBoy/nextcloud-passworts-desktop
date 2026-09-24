@@ -19,6 +19,8 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::i18n::t;
+
 pub const PWHASH_SALTBYTES: usize = 16;
 pub const SECRETBOX_NONCEBYTES: usize = 24;
 pub const SECRETBOX_KEYBYTES: usize = 32;
@@ -31,17 +33,17 @@ pub const CSE_TYPE: &str = "CSEv1r1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {
-    #[error("Das Verschlüsselungspasswort muss zwischen 12 und 128 Zeichen lang sein")]
+    #[error("{}", t("crypto_length"))]
     PasswordLength,
-    #[error("Ungültige Kodierung")]
+    #[error("{}", t("crypto_encoding"))]
     Encoding,
-    #[error("Entschlüsselung fehlgeschlagen")]
+    #[error("{}", t("crypto_decrypt"))]
     Decrypt,
-    #[error("Verschlüsselung fehlgeschlagen")]
+    #[error("{}", t("crypto_encrypt"))]
     Encrypt,
-    #[error("Schlüssel {0} fehlt im Schlüsselbund")]
+    #[error("{msg}: {id}", msg = t("crypto_missing_key"), id = .0)]
     MissingKey(String),
-    #[error("Ungültige Challenge")]
+    #[error("{}", t("crypto_challenge"))]
     Challenge,
 }
 
