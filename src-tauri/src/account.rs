@@ -61,11 +61,43 @@ fn file(dir: &Path) -> PathBuf {
 pub fn normalize_server(input: &str) -> Result<String, String> {
     let input = input.trim().trim_end_matches('/');
     let with_scheme = if input.contains("://") { input.to_string() } else { format!("https://{input}") };
-    let url = url::Url::parse(&with_scheme).map_err(|_| "Ungültige Serveradresse".to_string())?;
+    let mut url = url::Url::parse(&with_scheme).map_err(|_| "Ungültige Serveradresse".to_string())?;
     if url.scheme() != "https" && !is_local(&url) {
         return Err("Die Passwords API funktioniert nur über HTTPS".into());
     }
+    // Wer eine kopierte Adresse wie …/index.php/login/v2 oder …/apps/passwords einträgt,
+    // meint die Nextcloud davor. Ein Unterordner wie /nextcloud bleibt erhalten.
+    let path = url.path().to_string();
+    let base = ["/index.php", "/login", "/apps/", "/remote.php", "/ocs/"]
+        .iter()
+        .filter_map(|marker| path.find(marker))
+        .min()
+        .map(|cut| &path[..cut])
+        .unwrap_or(&path);
+    url.set_path(base.trim_end_matches('/'));
+    url.set_query(None);
+    url.set_fragment(None);
     Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_server;
+
+    #[test]
+    fn strips_copied_nextcloud_paths() {
+        let expect = "https://cloud.example.com";
+        assert_eq!(normalize_server("cloud.example.com").unwrap(), expect);
+        assert_eq!(normalize_server("https://cloud.example.com/").unwrap(), expect);
+        assert_eq!(normalize_server("https://cloud.example.com/index.php/login/v2").unwrap(), expect);
+        assert_eq!(normalize_server("https://cloud.example.com/index.php/apps/passwords/#/all").unwrap(), expect);
+        assert_eq!(normalize_server("cloud.example.com/login?redirect_url=x").unwrap(), expect);
+        assert_eq!(
+            normalize_server("https://example.com/nextcloud/index.php/apps/files").unwrap(),
+            "https://example.com/nextcloud"
+        );
+        assert!(normalize_server("http://cloud.example.com").is_err());
+    }
 }
 
 fn is_local(url: &url::Url) -> bool {

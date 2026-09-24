@@ -14,14 +14,31 @@ const SESSION_HEADER: &str = "X-API-SESSION";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
-    #[error("Keine Verbindung zum Server: {0}")]
-    Network(#[from] reqwest::Error),
+    #[error("Keine Verbindung zum Server ({0})")]
+    Network(String),
     #[error("Anmeldung abgelehnt. Bitte neu verbinden.")]
     Unauthorized,
     #[error("{0}")]
     Server(String),
     #[error("Unerwartete Antwort vom Server")]
     Invalid,
+}
+
+impl From<reqwest::Error> for ApiError {
+    /// reqwest nennt die eigentliche Ursache (DNS, Zertifikat, Timeout …) nur in der
+    /// `source()` Kette, deshalb werden alle Glieder in die Meldung übernommen.
+    fn from(error: reqwest::Error) -> Self {
+        let mut parts = vec![error.to_string()];
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            let text = cause.to_string();
+            if parts.last() != Some(&text) {
+                parts.push(text);
+            }
+            source = cause.source();
+        }
+        ApiError::Network(parts.join(": "))
+    }
 }
 
 #[derive(Deserialize)]
@@ -149,6 +166,7 @@ pub fn http_client() -> Result<reqwest::Client, ApiError> {
     Ok(reqwest::Client::builder()
         .user_agent(concat!("Nextcloud Passwords Desktop/", env!("CARGO_PKG_VERSION")))
         .default_headers(headers)
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(30))
         .build()?)
 }
@@ -202,6 +220,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_error_contains_cause() {
+        let error = tauri::async_runtime::block_on(async {
+            http_client().unwrap().get("https://ungueltig.invalid/").send().await.unwrap_err()
+        });
+        let text = ApiError::from(error).to_string();
+        assert!(text.starts_with("Keine Verbindung zum Server ("), "{text}");
+        assert!(text.contains(':'), "Ursache fehlt: {text}");
+    }
 
     #[test]
     fn session_open_accepts_empty_array_keys() {
