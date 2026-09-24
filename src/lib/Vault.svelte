@@ -1,8 +1,14 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { openUrl } from "@tauri-apps/plugin-opener";
-  import { api, errorText, type Account, type CopyField, type Entry, type VaultView } from "./api";
-  import Editor from "./Editor.svelte";
+  import { onMount, untrack } from "svelte";
+  import { KeyRound, TriangleAlert } from "@lucide/svelte";
+  import { api, errorText, type Account, type Entry, type VaultView } from "./api";
+  import { t } from "./i18n.svelte";
+  import { confirmDialog, promptDialog, toast, ui } from "./store.svelte";
+  import Sidebar from "./vault/Sidebar.svelte";
+  import EntryList from "./vault/EntryList.svelte";
+  import EntryDetail from "./vault/EntryDetail.svelte";
+  import Editor from "./vault/Editor.svelte";
+  import SettingsDialog from "./vault/SettingsDialog.svelte";
 
   let {
     vault = $bindable(),
@@ -11,163 +17,248 @@
     onLogout,
   }: { vault: VaultView; account: Account; onLock: () => void; onLogout: () => void } = $props();
 
-  type Filter = "all" | "favorites" | string;
+  // Ruhige Farben für neue Tags (Tailwind 500er Töne).
+  const TAG_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
 
-  let filter = $state<Filter>("all");
+  let filter = $state("all");
   let query = $state("");
   let selectedId = $state<string | null>(null);
-  let editing = $state<Entry | "new" | null>(null);
-  let revealed = $state<string | null>(null);
-  let revealedFields = $state<Record<number, string>>({});
-  let toast = $state("");
-  let error = $state("");
+  let mode = $state<"view" | "edit" | "new">("view");
   let busy = $state(false);
+  let showSettings = $state(false);
   let searchInput = $state<HTMLInputElement>();
-  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  let detail = $state<EntryDetail>();
 
-  const folderName = $derived(new Map(vault.folders.map((f) => [f.id, f.label])));
+  const trashMode = $derived(filter === "trash");
 
   const visible = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    return vault.entries.filter((e) => {
-      if (filter === "favorites" && !e.favorite) return false;
-      if (filter !== "all" && filter !== "favorites" && e.folder !== filter) return false;
-      if (!q) return true;
-      return [e.label, e.username, e.url, e.notes].some((v) => v.toLowerCase().includes(q));
+    let list: Entry[] = trashMode ? vault.trash : vault.entries;
+    if (filter === "favorites") list = list.filter((e) => e.favorite);
+    else if (filter === "security") list = list.filter((e) => e.status === 1 || e.status === 2);
+    else if (filter.startsWith("folder:")) list = list.filter((e) => e.folder === filter.slice(7));
+    else if (filter.startsWith("tag:")) list = list.filter((e) => e.tags.includes(filter.slice(4)));
+    if (q) {
+      list = list.filter((e) =>
+        [e.label, e.username, e.url, e.notes, ...e.fields.filter((f) => f.type !== "secret").map((f) => f.value)].some(
+          (v) => v.toLowerCase().includes(q),
+        ),
+      );
+    }
+    if (ui.settings.sort === "edited" && !trashMode) list = [...list].sort((a, b) => b.edited - a.edited);
+    return list;
+  });
+
+  const title = $derived.by(() => {
+    if (filter === "favorites") return t("favorites");
+    if (filter === "security") return t("security");
+    if (filter === "trash") return t("trash");
+    if (filter.startsWith("folder:")) return vault.folders.find((f) => f.id === filter.slice(7))?.label ?? t("folder");
+    if (filter.startsWith("tag:")) return vault.tags.find((tag) => tag.id === filter.slice(4))?.label ?? t("tags");
+    return t("all_items");
+  });
+
+  const selected = $derived(
+    (trashMode ? vault.trash : vault.entries).find((e) => e.id === selectedId) ?? null,
+  );
+
+  $effect(() => {
+    // Nur beim Wechsel des Filters: Auswahl verwerfen, wenn der Eintrag dort nicht vorkommt,
+    // und einen offenen Editor schließen. Alles andere bewusst nicht als Abhängigkeit.
+    void filter;
+    untrack(() => {
+      if (selectedId && !visible.some((e) => e.id === selectedId)) selectedId = null;
+      if (mode === "edit") mode = "view";
     });
   });
 
-  const selected = $derived(vault.entries.find((e) => e.id === selectedId) ?? null);
-
-  $effect(() => {
-    // Anzeige zurücksetzen, sobald ein anderer Eintrag gewählt wird.
-    selectedId;
-    revealed = null;
-    revealedFields = {};
-  });
-
-  function notify(text: string) {
-    toast = text;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toast = ""), 2500);
-  }
-
-  async function copy(field: CopyField) {
-    if (!selected) return;
-    await api.copy(selected.id, field);
-    const names = { password: "Passwort", username: "Benutzername", url: "Adresse" };
-    notify(`${names[field]} kopiert${field === "password" ? " · wird in 30 s geleert" : ""}`);
-  }
-
-  async function copyCustom(index: number, label: string) {
-    if (!selected) return;
-    await api.copyField(selected.id, index);
-    notify(`${label} kopiert · wird in 30 s geleert`);
-  }
-
-  async function toggleReveal() {
-    if (!selected) return;
-    revealed = revealed === null ? await api.reveal(selected.id) : null;
-  }
-
-  async function toggleRevealField(index: number) {
-    if (!selected) return;
-    if (index in revealedFields) {
-      const { [index]: _, ...rest } = revealedFields;
-      revealedFields = rest;
-    } else {
-      revealedFields = { ...revealedFields, [index]: await api.revealField(selected.id, index) };
+  async function run<T>(action: () => Promise<T>, success?: string): Promise<T | undefined> {
+    busy = true;
+    try {
+      const result = await action();
+      if (success) toast(success);
+      return result;
+    } catch (err) {
+      toast(errorText(err), "error");
+      return undefined;
+    } finally {
+      busy = false;
     }
   }
 
-  async function trash() {
-    if (!selected || !confirm(`„${selected.label}“ in den Papierkorb verschieben?`)) return;
-    busy = true;
-    try {
-      vault = await api.trash(selected.id);
+  async function refresh() {
+    const v = await run(() => api.refresh(), t("refreshed"));
+    if (v) vault = v;
+  }
+
+  async function deleteSelected() {
+    if (!selected) return;
+    const forever = trashMode;
+    const ok = await confirmDialog({
+      title: forever ? t("delete_forever_title") : t("move_to_trash_title"),
+      message: forever
+        ? t("delete_forever_message", { name: selected.label })
+        : t("move_to_trash_message", { name: selected.label }),
+      confirmLabel: forever ? t("delete_forever") : t("move_to_trash"),
+      danger: true,
+    });
+    if (!ok) return;
+    const v = await run(() => api.delete(selected.id), forever ? t("deleted") : t("moved_to_trash"));
+    if (v) {
+      vault = v;
       selectedId = null;
-      notify("In den Papierkorb verschoben");
-    } catch (err) {
-      error = errorText(err);
-    } finally {
-      busy = false;
     }
   }
 
-  async function reload() {
-    busy = true;
-    error = "";
-    try {
-      vault = await api.refresh();
-      notify("Aktualisiert");
-    } catch (err) {
-      error = errorText(err);
-    } finally {
-      busy = false;
+  async function restoreSelected() {
+    if (!selected) return;
+    const v = await run(() => api.restore(selected.id), t("restored"));
+    if (v) {
+      vault = v;
+      selectedId = null;
     }
+  }
+
+  async function emptyTrash() {
+    const ok = await confirmDialog({
+      title: t("empty_trash_title"),
+      message: t("empty_trash_message", { n: vault.trash.length }),
+      confirmLabel: t("empty_trash"),
+      danger: true,
+    });
+    if (!ok) return;
+    const v = await run(() => api.emptyTrash(), t("trash_emptied"));
+    if (v) vault = v;
+  }
+
+  async function toggleFavorite() {
+    if (!selected) return;
+    const v = await run(() => api.setFavorite(selected.id, !selected.favorite));
+    if (v) vault = v;
+  }
+
+  async function createFolder() {
+    const label = await promptDialog({ title: t("new_folder"), confirmLabel: t("create"), placeholder: t("folder_name") });
+    if (!label) return;
+    const result = await run(() => api.createFolder(label, null), t("folder_created"));
+    if (result) {
+      vault = result.vault;
+      filter = `folder:${result.id}`;
+    }
+  }
+
+  async function renameFolder(id: string) {
+    const folder = vault.folders.find((f) => f.id === id);
+    const label = await promptDialog({ title: t("rename_folder"), confirmLabel: t("save"), value: folder?.label });
+    if (!label || label === folder?.label) return;
+    const v = await run(() => api.renameFolder(id, label));
+    if (v) vault = v;
+  }
+
+  async function deleteFolder(id: string) {
+    const folder = vault.folders.find((f) => f.id === id);
+    const ok = await confirmDialog({
+      title: t("delete_folder_title"),
+      message: t("delete_folder_message", { name: folder?.label ?? "" }),
+      confirmLabel: t("delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    const v = await run(() => api.deleteFolder(id), t("folder_deleted"));
+    if (v) {
+      vault = v;
+      if (filter === `folder:${id}`) filter = "all";
+    }
+  }
+
+  async function createTag(): Promise<string | null> {
+    const label = await promptDialog({ title: t("new_tag"), confirmLabel: t("create"), placeholder: t("tag_name") });
+    if (!label) return null;
+    const color = TAG_COLORS[vault.tags.length % TAG_COLORS.length];
+    const result = await run(() => api.createTag(label, color), t("tag_created"));
+    if (!result) return null;
+    vault = result.vault;
+    return result.id.id;
+  }
+
+  async function deleteTag(id: string) {
+    const tag = vault.tags.find((x) => x.id === id);
+    const ok = await confirmDialog({
+      title: t("delete_tag_title"),
+      message: t("delete_tag_message", { name: tag?.label ?? "" }),
+      confirmLabel: t("delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    const v = await run(() => api.deleteTag(id), t("tag_deleted"));
+    if (v) {
+      vault = v;
+      if (filter === `tag:${id}`) filter = "all";
+    }
+  }
+
+  function newEntry() {
+    if (trashMode || filter === "security") filter = "all";
+    mode = "new";
   }
 
   function onSaved(id: string, v: VaultView) {
     vault = v;
-    editing = null;
+    mode = "view";
     selectedId = id;
-    notify("Gespeichert");
-  }
-
-  function open(url: string) {
-    const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
-    openUrl(target).catch((err) => (error = errorText(err)));
-  }
-
-  function host(url: string) {
-    try {
-      return new URL(/^[a-z]+:\/\//i.test(url) ? url : `https://${url}`).host;
-    } catch {
-      return url;
-    }
-  }
-
-  function edited(ts: number) {
-    return ts ? new Date(ts * 1000).toLocaleDateString("de-DE", { dateStyle: "medium" }) : "–";
+    toast(t("saved"));
   }
 
   function move(delta: number) {
     if (!visible.length) return;
     const i = visible.findIndex((e) => e.id === selectedId);
-    const next = Math.min(visible.length - 1, Math.max(0, i + delta));
+    const next = i < 0 ? 0 : Math.min(visible.length - 1, Math.max(0, i + delta));
     selectedId = visible[next].id;
+    mode = "view";
     document.getElementById(`entry-${selectedId}`)?.scrollIntoView({ block: "nearest" });
   }
 
   function onKey(e: KeyboardEvent) {
-    if (editing) return;
+    if (mode !== "view" || showSettings || ui.dialog) return;
     const mod = e.ctrlKey || e.metaKey;
-    const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
-    if (mod && e.key === "f") {
+    const target = e.target as HTMLElement;
+    const inField = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+    const key = e.key.toLowerCase();
+
+    if (mod && key === "f") {
       e.preventDefault();
       searchInput?.focus();
       searchInput?.select();
-    } else if (mod && e.key === "n") {
+    } else if (mod && key === "n") {
       e.preventDefault();
-      editing = "new";
-    } else if (mod && e.key === "l") {
+      newEntry();
+    } else if (mod && key === "l" && vault.lockable) {
       e.preventDefault();
       onLock();
-    } else if (mod && e.key === "c" && selected && !inField && !window.getSelection()?.toString()) {
+    } else if (mod && key === ",") {
       e.preventDefault();
-      copy("password");
-    } else if (mod && e.key === "b" && selected) {
+      showSettings = true;
+    } else if (mod && key === "e" && selected?.editable && !trashMode) {
       e.preventDefault();
-      copy("username");
-    } else if (e.key === "ArrowDown" && (!inField || e.target === searchInput)) {
+      mode = "edit";
+    } else if (mod && key === "c" && selected && (!inField || target === searchInput) && !window.getSelection()?.toString()) {
+      e.preventDefault();
+      detail?.copy("password");
+    } else if (mod && key === "b" && selected) {
+      e.preventDefault();
+      detail?.copy("username");
+    } else if (key === "delete" && selected && !inField) {
+      e.preventDefault();
+      deleteSelected();
+    } else if (e.key === "ArrowDown" && (!inField || target === searchInput)) {
       e.preventDefault();
       move(1);
-    } else if (e.key === "ArrowUp" && (!inField || e.target === searchInput)) {
+    } else if (e.key === "ArrowUp" && (!inField || target === searchInput)) {
       e.preventDefault();
       move(-1);
-    } else if (e.key === "Enter" && e.target === searchInput && selected) {
-      copy("password");
-    } else if (e.key === "Escape" && e.target === searchInput) {
+    } else if (e.key === "Enter" && target === searchInput && selected && !trashMode) {
+      detail?.copy("password");
+    } else if (e.key === "Escape" && target === searchInput) {
       query = "";
     }
   }
@@ -178,319 +269,109 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="layout">
-  <nav class="sidebar">
-    <button class="nav" class:active={filter === "all"} onclick={() => (filter = "all")}>
-      Alle <span class="count">{vault.entries.length}</span>
-    </button>
-    <button class="nav" class:active={filter === "favorites"} onclick={() => (filter = "favorites")}>Favoriten</button>
+  <Sidebar
+    {vault}
+    {account}
+    bind:filter
+    {busy}
+    onCreateFolder={createFolder}
+    onRenameFolder={renameFolder}
+    onDeleteFolder={deleteFolder}
+    onCreateTag={() => void createTag()}
+    onDeleteTag={deleteTag}
+    onSettings={() => (showSettings = true)}
+    onRefresh={refresh}
+    {onLock}
+    onLogout={async () => {
+      const ok = await confirmDialog({
+        title: t("logout_title"),
+        message: t("logout_message"),
+        confirmLabel: t("logout"),
+        danger: true,
+      });
+      if (ok) onLogout();
+    }}
+  />
 
-    {#if vault.folders.length}
-      <div class="section">Ordner</div>
-      {#each vault.folders as f (f.id)}
-        <button class="nav" class:active={filter === f.id} onclick={() => (filter = f.id)}>{f.label}</button>
-      {/each}
-    {/if}
+  <EntryList
+    entries={visible}
+    {title}
+    bind:selectedId
+    bind:query
+    bind:searchInput
+    {trashMode}
+    onNew={newEntry}
+    onEmptyTrash={emptyTrash}
+  />
 
-    <div class="spacer"></div>
-    <div class="account muted" title={account.server}>{account.user}</div>
-    <div class="actions">
-      <button class="ghost" onclick={reload} disabled={busy} title="Aktualisieren">Aktualisieren</button>
-      <button class="ghost" onclick={onLock} title="Sperren (Strg+L)">Sperren</button>
-    </div>
-    <button class="ghost muted small" onclick={() => confirm("Konto von diesem Gerät entfernen?") && onLogout()}>
-      Abmelden
-    </button>
-  </nav>
-
-  <section class="list">
-    <div class="search">
-      <input bind:this={searchInput} bind:value={query} placeholder="Suchen" spellcheck="false" />
-      <button class="primary" onclick={() => (editing = "new")} title="Neu (Strg+N)">Neu</button>
-    </div>
-    <div class="entries">
-      {#each visible as e (e.id)}
-        <button id="entry-{e.id}" class="entry" class:active={e.id === selectedId} onclick={() => (selectedId = e.id)}>
-          <span class="label">{e.label}</span>
-          <span class="sub muted">{e.username || host(e.url) || " "}</span>
-        </button>
-      {:else}
-        <p class="empty muted">{query ? "Keine Treffer" : "Keine Einträge"}</p>
-      {/each}
-    </div>
+  <main class="content">
     {#if vault.broken > 0}
-      <p class="broken">{vault.broken} Einträge konnten nicht entschlüsselt werden</p>
-    {/if}
-  </section>
-
-  <section class="detail">
-    {#if editing}
-      <Editor
-        entry={editing === "new" ? null : editing}
-        folders={vault.folders}
-        defaultFolder={filter !== "all" && filter !== "favorites" ? filter : null}
-        {onSaved}
-        onCancel={() => (editing = null)}
-      />
-    {:else if selected}
-      <header>
-        <div>
-          <h2 class="selectable">{selected.label}</h2>
-          {#if selected.folder && folderName.get(selected.folder)}
-            <span class="muted">{folderName.get(selected.folder)}</span>
-          {/if}
-        </div>
-        <div class="row">
-          {#if selected.editable}<button onclick={() => (editing = selected)}>Bearbeiten</button>{/if}
-          <button class="danger" onclick={trash} disabled={busy}>Löschen</button>
-        </div>
-      </header>
-
-      {#if selected.status === 2}
-        <p class="alert error status">Dieses Passwort wurde in einem Datenleck gefunden</p>
-      {:else if selected.status === 1}
-        <p class="alert warn status">Dieses Passwort ist doppelt vergeben oder veraltet</p>
-      {/if}
-
-      <dl>
-        {#if selected.username}
-          <dt>Benutzername</dt>
-          <dd>
-            <span class="value selectable">{selected.username}</span>
-            <button class="ghost" onclick={() => copy("username")}>Kopieren</button>
-          </dd>
-        {/if}
-
-        <dt>Passwort</dt>
-        <dd>
-          <span class="value mono selectable">{revealed ?? "••••••••••••"}</span>
-          <button class="ghost" onclick={toggleReveal}>{revealed === null ? "Anzeigen" : "Verbergen"}</button>
-          <button class="ghost" onclick={() => copy("password")}>Kopieren</button>
-        </dd>
-
-        {#if selected.url}
-          <dt>Adresse</dt>
-          <dd>
-            <span class="value selectable">{selected.url}</span>
-            <button class="ghost" onclick={() => open(selected.url)}>Öffnen</button>
-            <button class="ghost" onclick={() => copy("url")}>Kopieren</button>
-          </dd>
-        {/if}
-
-        {#each selected.fields as f (f.index)}
-          <dt>{f.label}</dt>
-          <dd>
-            {#if f.type === "secret"}
-              <span class="value mono selectable">{revealedFields[f.index] ?? "••••••••"}</span>
-              <button class="ghost" onclick={() => toggleRevealField(f.index)}>
-                {f.index in revealedFields ? "Verbergen" : "Anzeigen"}
-              </button>
-            {:else}
-              <span class="value selectable">{f.value}</span>
-            {/if}
-            <button class="ghost" onclick={() => copyCustom(f.index, f.label)}>Kopieren</button>
-          </dd>
-        {/each}
-
-        {#if selected.notes}
-          <dt>Notizen</dt>
-          <dd><p class="notes selectable">{selected.notes}</p></dd>
-        {/if}
-      </dl>
-
-      <p class="meta muted">Zuletzt geändert {edited(selected.edited)}</p>
-    {:else}
-      <div class="placeholder muted">
-        <p>Eintrag auswählen</p>
-        <p class="keys">Strg+F Suchen · Strg+N Neu · Strg+C Passwort kopieren · Strg+B Benutzername · Strg+L Sperren</p>
+      <div class="alert warn broken">
+        <TriangleAlert size={16} /><span>{t("broken_entries", { n: vault.broken })}</span>
       </div>
     {/if}
 
-    {#if error}<p class="error">{error}</p>{/if}
-  </section>
-
-  {#if toast}<div class="toast">{toast}</div>{/if}
+    {#if mode === "new" || (mode === "edit" && selected)}
+      {#key mode === "edit" ? selected?.id : "new"}
+        <Editor
+          entry={mode === "edit" ? selected : null}
+          {vault}
+          defaultFolder={filter.startsWith("folder:") ? filter.slice(7) : null}
+          defaultTag={filter.startsWith("tag:") ? filter.slice(4) : null}
+          {onSaved}
+          onCancel={() => (mode = "view")}
+          onCreateTag={createTag}
+        />
+      {/key}
+    {:else if selected}
+      <EntryDetail
+        bind:this={detail}
+        entry={selected}
+        {vault}
+        {trashMode}
+        {busy}
+        onEdit={() => (mode = "edit")}
+        onDelete={deleteSelected}
+        onRestore={restoreSelected}
+        onFavorite={toggleFavorite}
+      />
+    {:else}
+      <div class="placeholder">
+        <span class="mark"><KeyRound size={26} strokeWidth={1.6} /></span>
+        <p>{t("select_entry")}</p>
+        <div class="shortcuts">
+          <span><kbd>Ctrl F</kbd>{t("search")}</span>
+          <span><kbd>Ctrl N</kbd>{t("new_entry")}</span>
+          <span><kbd>↑ ↓</kbd>{t("navigate")}</span>
+          <span><kbd>Ctrl C</kbd>{t("copy_password")}</span>
+          <span><kbd>Ctrl B</kbd>{t("copy_username")}</span>
+          <span><kbd>Ctrl E</kbd>{t("edit")}</span>
+          {#if vault.lockable}<span><kbd>Ctrl L</kbd>{t("lock")}</span>{/if}
+          <span><kbd>Ctrl ,</kbd>{t("settings")}</span>
+        </div>
+      </div>
+    {/if}
+  </main>
 </div>
+
+{#if showSettings}
+  <SettingsDialog {account} lockable={vault.lockable} onClose={() => (showSettings = false)} />
+{/if}
 
 <style>
   .layout {
     height: 100%;
     display: grid;
-    grid-template-columns: 190px 300px 1fr;
+    grid-template-columns: 232px minmax(260px, 340px) minmax(0, 1fr);
   }
-
-  .sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 16px 10px;
-    background: hsl(var(--muted) / 0.4);
-    border-right: 1px solid hsl(var(--border));
+  .content {
+    min-width: 0;
     overflow-y: auto;
-  }
-  .nav {
-    width: 100%;
-    height: 36px;
-    padding: 0 12px;
-    justify-content: space-between;
-    font-weight: 400;
-    border: none;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .nav.active {
-    background: hsl(var(--accent));
-    font-weight: 600;
-  }
-  .count {
-    color: hsl(var(--muted-foreground));
-    font-weight: normal;
-  }
-  .section {
-    margin: 14px 12px 4px;
-    font-size: 12px;
-    color: hsl(var(--muted-foreground));
-  }
-  .spacer {
-    flex: 1;
-  }
-  .account {
-    padding: 0 12px 6px;
-    font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .actions {
-    display: flex;
-    gap: 2px;
-  }
-  .actions button {
-    flex: 1;
-    padding-inline: 6px;
-    font-weight: 400;
-  }
-  .small {
-    height: 30px;
-    font-size: 12px;
-    font-weight: 400;
-  }
-
-  .list {
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid hsl(var(--border));
-    min-height: 0;
-  }
-  .search {
-    display: flex;
-    gap: 8px;
-    padding: 12px;
-    border-bottom: 1px solid hsl(var(--border));
-  }
-  .entries {
-    flex: 1;
-    overflow-y: auto;
-    padding: 6px;
-  }
-  .entry {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
-    width: 100%;
-    height: auto;
-    border: none;
-    text-align: left;
-    padding: 8px 12px;
-    font-weight: 400;
-  }
-  .entry .label {
-    font-weight: 500;
-  }
-  .entry.active {
-    background: hsl(var(--accent));
-  }
-  .label,
-  .sub {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-  .sub {
-    font-size: 12px;
-  }
-  .empty {
-    text-align: center;
-    margin-top: 32px;
+    padding: 32px 40px;
   }
   .broken {
-    margin: 0;
-    padding: 8px 12px;
-    font-size: 12px;
-    color: hsl(var(--warning));
-    border-top: 1px solid hsl(var(--border));
-  }
-
-  .detail {
-    padding: 32px 40px;
-    overflow-y: auto;
-    min-width: 0;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
+    max-width: 720px;
     margin-bottom: 20px;
-  }
-  h2 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  .row {
-    display: flex;
-    gap: 6px;
-  }
-  .status {
-    margin: 0 0 16px;
-  }
-  dl {
-    margin: 0;
-  }
-  dt {
-    color: hsl(var(--muted-foreground));
-    font-size: 12px;
-    margin-top: 14px;
-  }
-  dd {
-    margin: 2px 0 0;
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    border-bottom: 1px solid hsl(var(--border));
-    padding-bottom: 6px;
-  }
-  .value {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  dd button {
-    height: 32px;
-    padding: 0 10px;
-    font-size: 12px;
-    color: hsl(var(--muted-foreground));
-  }
-  .notes {
-    margin: 0;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .meta {
-    margin-top: 24px;
-    font-size: 12px;
   }
   .placeholder {
     height: 100%;
@@ -498,22 +379,46 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 14px;
+    color: hsl(var(--muted-foreground));
     text-align: center;
   }
-  .keys {
-    font-size: 12px;
-    max-width: 320px;
+  .placeholder p {
+    margin: 0;
+    font-size: 15px;
   }
-
-  .toast {
-    position: fixed;
-    bottom: 16px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 8px 14px;
-    background: hsl(var(--primary));
-    color: hsl(var(--primary-foreground));
-    border-radius: var(--radius);
-    font-size: 13px;
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+  }
+  .shortcuts {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    gap: 8px 28px;
+    margin-top: 12px;
+    font-size: 12px;
+    text-align: left;
+  }
+  .shortcuts span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .shortcuts kbd {
+    min-width: 52px;
+    justify-content: center;
+  }
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: 200px minmax(220px, 280px) minmax(0, 1fr);
+    }
+    .content {
+      padding: 24px;
+    }
   }
 </style>

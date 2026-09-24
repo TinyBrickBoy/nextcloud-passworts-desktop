@@ -12,24 +12,29 @@
   --muted-foreground: 240 3.8% 46.1%;
   --accent: 240 4.8% 95.9%;
   --accent-foreground: 240 5.9% 10%;
-  /* Statusfarben wie Tailwind red-600 und yellow-600 */
+  --sidebar: 240 4.8% 97.5%;
+  /* Statusfarben wie Tailwind red-600, yellow-600, emerald-600 */
   --destructive: 0 72.2% 50.6%;
   --warning: 40.6 96.1% 40.4%;
+  --success: 161.4 93.5% 30.4%;
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
   --ring: 240 5.9% 10%;
   --radius: 0.5rem;
+  --shadow: 0 1px 2px hsl(240 10% 3.9% / 0.05);
+  --shadow-lg: 0 10px 30px -10px hsl(240 10% 3.9% / 0.25);
 
   --font: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", "DejaVu Sans Mono", Consolas, monospace;
   color-scheme: light;
 }
 
+/* Dunkle Werte: automatisch nach System, außer "hell" ist fest gewählt, oder fest "dunkel". */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
+    --card: 240 6% 7%;
     --card-foreground: 0 0% 98%;
     --primary: 0 0% 98%;
     --primary-foreground: 240 5.9% 10%;
@@ -39,14 +44,43 @@
     --muted-foreground: 240 5% 64.9%;
     --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
-    /* red-400 und yellow-400 */
+    --sidebar: 240 6% 6%;
+    /* red-400, yellow-400, emerald-400 */
     --destructive: 0 90.6% 70.8%;
     --warning: 50.4 97.8% 63.5%;
+    --success: 158.1 64.4% 51.6%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
+    --shadow: 0 1px 2px hsl(0 0% 0% / 0.3);
+    --shadow-lg: 0 10px 30px -10px hsl(0 0% 0% / 0.6);
     color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 6% 7%;
+  --card-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --sidebar: 240 6% 6%;
+  --destructive: 0 90.6% 70.8%;
+  --warning: 50.4 97.8% 63.5%;
+  --success: 158.1 64.4% 51.6%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+  --shadow: 0 1px 2px hsl(0 0% 0% / 0.3);
+  --shadow-lg: 0 10px 30px -10px hsl(0 0% 0% / 0.6);
+  color-scheme: dark;
 }
 
 * {
@@ -79,25 +113,26 @@ button {
   color: inherit;
 }
 
-input,
+:where(input:not([type="checkbox"]):not([type="range"])),
 textarea,
 select {
   width: 100%;
   height: 40px;
-  padding: 0 16px;
+  padding: 0 12px;
   background: hsl(var(--background));
   border: 1px solid hsl(var(--input));
   border-radius: calc(var(--radius) - 2px);
   outline: none;
   user-select: text;
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
 
 textarea {
   height: auto;
-  min-height: 96px;
-  padding: 10px 16px;
+  min-height: 88px;
+  padding: 10px 12px;
   resize: vertical;
+  line-height: 1.5;
 }
 
 input::placeholder,
@@ -108,7 +143,7 @@ textarea::placeholder {
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring));
+  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.6);
 }
 
 button:focus-visible,
@@ -121,22 +156,33 @@ select option {
   background: hsl(var(--background));
 }
 
+input[type="checkbox"],
+input[type="range"] {
+  accent-color: hsl(var(--primary));
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
 button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 40px;
-  padding: 0 16px;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
   font-size: 14px;
   font-weight: 500;
-  background: transparent;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--input));
   border-radius: calc(var(--radius) - 2px);
   outline: none;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s, opacity 0.15s;
+  transition: background-color 0.15s, opacity 0.15s, color 0.15s;
 }
 
 button:hover:not(:disabled) {
@@ -160,6 +206,7 @@ button.primary:hover:not(:disabled) {
 }
 
 button.ghost {
+  background: transparent;
   border-color: transparent;
 }
 
@@ -167,7 +214,43 @@ button.danger {
   color: hsl(var(--destructive));
 }
 
-label {
+button.danger.solid {
+  background: hsl(var(--destructive));
+  border-color: transparent;
+  color: hsl(0 0% 100%);
+}
+
+button.danger.solid:hover:not(:disabled) {
+  background: hsl(var(--destructive));
+  opacity: 0.9;
+}
+
+/* Quadratischer Icon Button */
+button.icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: hsl(var(--muted-foreground));
+}
+
+button.icon:hover:not(:disabled) {
+  color: hsl(var(--foreground));
+}
+
+button.icon.active {
+  color: hsl(var(--foreground));
+}
+
+button.sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+label,
+.label {
   display: block;
   margin-bottom: 6px;
   font-size: 13px;
@@ -175,19 +258,65 @@ label {
 }
 
 h1,
-h2 {
+h2,
+h3 {
   letter-spacing: -0.02em;
+  margin: 0;
 }
 
 .muted {
   color: hsl(var(--muted-foreground));
 }
 
+.card {
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: hsl(var(--muted));
+  white-space: nowrap;
+}
+
+.badge .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid hsl(var(--border));
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font: 500 11px var(--font);
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--background));
+}
+
 /* Alerts: Statusfarbe mit /10 Hintergrund und /20 Rand */
 .alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0;
   padding: 12px;
-  border-radius: 4px;
+  border-radius: calc(var(--radius) - 2px);
   font-size: 13px;
   border: 1px solid;
 }
@@ -195,18 +324,26 @@ h2 {
 .error,
 .alert.error {
   margin: 0;
-  padding: 12px;
-  border-radius: 4px;
+  padding: 10px 12px;
+  border-radius: calc(var(--radius) - 2px);
   font-size: 13px;
   color: hsl(var(--destructive));
   background: hsl(var(--destructive) / 0.1);
   border: 1px solid hsl(var(--destructive) / 0.2);
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .alert.warn {
   color: hsl(var(--warning));
   background: hsl(var(--warning) / 0.1);
   border-color: hsl(var(--warning) / 0.2);
+}
+
+.alert.ok {
+  color: hsl(var(--success));
+  background: hsl(var(--success) / 0.1);
+  border-color: hsl(var(--success) / 0.2);
 }
 
 .mono {
@@ -217,11 +354,38 @@ h2 {
   user-select: text;
 }
 
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--border));
-  border-radius: 4px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.4);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
 }

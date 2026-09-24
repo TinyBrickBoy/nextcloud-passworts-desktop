@@ -3,12 +3,12 @@
 //! Unter Linux (X11) gehört der Inhalt dem Prozess, der ihn gesetzt hat, und verschwindet,
 //! sobald das `arboard::Clipboard` Objekt freigegeben wird. Deshalb lebt es in einem eigenen Thread.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
+use std::sync::Arc;
 use std::time::Duration;
 
 use zeroize::Zeroizing;
-
-pub const CLEAR_AFTER: Duration = Duration::from_secs(30);
 
 enum Command {
     Set(Zeroizing<String>),
@@ -17,6 +17,8 @@ enum Command {
 
 pub struct Clipboard {
     tx: Sender<Command>,
+    /// Sekunden bis zum Leeren, 0 = nie.
+    clear_after: Arc<AtomicU32>,
 }
 
 impl Clipboard {
@@ -42,15 +44,23 @@ impl Clipboard {
                 }
             }
         });
-        Self { tx }
+        Self { tx, clear_after: Arc::new(AtomicU32::new(30)) }
+    }
+
+    pub fn set_clear_after(&self, seconds: u32) {
+        self.clear_after.store(seconds, Ordering::Relaxed);
     }
 
     pub fn copy(&self, text: String) {
         let text = Zeroizing::new(text);
         let _ = self.tx.send(Command::Set(text.clone()));
+        let seconds = self.clear_after.load(Ordering::Relaxed);
+        if seconds == 0 {
+            return;
+        }
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(CLEAR_AFTER);
+            std::thread::sleep(Duration::from_secs(seconds as u64));
             let _ = tx.send(Command::ClearIf(text));
         });
     }

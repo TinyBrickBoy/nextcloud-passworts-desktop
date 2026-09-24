@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{http_client, ApiError};
+use crate::i18n::t;
 
 const KEYRING_SERVICE: &str = "nextcloud-passwords-desktop";
 
@@ -22,19 +23,19 @@ pub struct Account {
 impl Account {
     fn keyring_entry(&self) -> Result<keyring::Entry, String> {
         keyring::Entry::new(KEYRING_SERVICE, &format!("{}@{}", self.user, self.server))
-            .map_err(|e| format!("Schlüsselbund nicht verfügbar: {e}"))
+            .map_err(|e| format!("{}: {e}", t("keyring_unavailable")))
     }
 
     pub fn app_password(&self) -> Result<String, String> {
         self.keyring_entry()?
             .get_password()
-            .map_err(|e| format!("App Passwort nicht im Schlüsselbund gefunden: {e}"))
+            .map_err(|e| format!("{}: {e}", t("keyring_missing")))
     }
 
     pub fn save(&self, dir: &Path, app_password: &str) -> Result<(), String> {
         self.keyring_entry()?
             .set_password(app_password)
-            .map_err(|e| format!("Speichern im Schlüsselbund fehlgeschlagen: {e}"))?;
+            .map_err(|e| format!("{}: {e}", t("keyring_save")))?;
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
         std::fs::write(file(dir), json).map_err(|e| e.to_string())
@@ -61,9 +62,9 @@ fn file(dir: &Path) -> PathBuf {
 pub fn normalize_server(input: &str) -> Result<String, String> {
     let input = input.trim().trim_end_matches('/');
     let with_scheme = if input.contains("://") { input.to_string() } else { format!("https://{input}") };
-    let mut url = url::Url::parse(&with_scheme).map_err(|_| "Ungültige Serveradresse".to_string())?;
+    let mut url = url::Url::parse(&with_scheme).map_err(|_| t("invalid_server").to_string())?;
     if url.scheme() != "https" && !is_local(&url) {
-        return Err("Die Passwords API funktioniert nur über HTTPS".into());
+        return Err(t("https_only").into());
     }
     // Wer eine kopierte Adresse wie …/index.php/login/v2 oder …/apps/passwords einträgt,
     // meint die Nextcloud davor. Ein Unterordner wie /nextcloud bleibt erhalten.
@@ -130,10 +131,7 @@ pub async fn flow_start(server: &str) -> Result<FlowStart, ApiError> {
         .send()
         .await?;
     if !response.status().is_success() {
-        return Err(ApiError::Server(format!(
-            "Login nicht möglich ({}). Ist das ein Nextcloud Server?",
-            response.status().as_u16()
-        )));
+        return Err(ApiError::Server(format!("{} ({})", t("login_failed"), response.status().as_u16())));
     }
     response.json().await.map_err(|_| ApiError::Invalid)
 }
@@ -155,5 +153,5 @@ pub async fn flow_poll(poll: &FlowPoll, cancelled: impl Fn() -> bool) -> Result<
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
-    Err(ApiError::Server("Zeit für die Anmeldung abgelaufen".into()))
+    Err(ApiError::Server(t("login_timeout").into()))
 }
