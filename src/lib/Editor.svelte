@@ -126,7 +126,7 @@
 
   <div>
     <label for="notes">Notizen</label>
-    <textarea id="notes" bind:value={notes} rows="4" maxlength="4096"></textarea>
+    <textarea id="notes" bind:value={notes} rows="3" maxlength="4096"></textarea>
   </div>
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -141,11 +141,14 @@
   form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
     max-width: 520px;
   }
+  textarea {
+    min-height: 72px;
+  }
   h2 {
-    margin: 0 0 6px;
+    margin: 0 0 4px;
     font-size: 20px;
     font-weight: 600;
   }

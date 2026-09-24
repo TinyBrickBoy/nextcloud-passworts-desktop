@@ -246,9 +246,9 @@
       </header>
 
       {#if selected.status === 2}
-        <p class="status bad">Dieses Passwort wurde in einem Datenleck gefunden</p>
+        <p class="alert error status">Dieses Passwort wurde in einem Datenleck gefunden</p>
       {:else if selected.status === 1}
-        <p class="status warn">Dieses Passwort ist doppelt vergeben oder veraltet</p>
+        <p class="alert warn status">Dieses Passwort ist doppelt vergeben oder veraltet</p>
       {/if}
 
       <dl>
@@ -329,7 +329,7 @@
   }
   .nav {
     width: 100%;
-    height: 34px;
+    height: 36px;
     padding: 0 12px;
     justify-content: space-between;
     font-weight: 400;
@@ -455,13 +455,6 @@
   }
   .status {
     margin: 0 0 16px;
-    font-size: 13px;
-  }
-  .bad {
-    color: hsl(var(--destructive));
-  }
-  .warn {
-    color: hsl(var(--warning));
   }
   dl {
     margin: 0;
@@ -485,7 +478,7 @@
     overflow-wrap: anywhere;
   }
   dd button {
-    height: 28px;
+    height: 32px;
     padding: 0 10px;
     font-size: 12px;
     color: hsl(var(--muted-foreground));
