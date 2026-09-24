@@ -1,3 +1,6 @@
+> [!NOTE]
+> This project was made using AI.
+
 # Passwords Desktop
 
 A clean, minimal desktop client for the [Nextcloud Passwords](https://apps.nextcloud.com/apps/passwords) app.
