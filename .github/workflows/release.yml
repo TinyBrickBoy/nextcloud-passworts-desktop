@@ -48,7 +48,16 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          VERSION="${TAG#v}"
+          # Tauri braucht Semver (1.2.3). Kurze Tags wie v1.0 oder 2 werden mit .0 aufgefüllt.
+          VERSION=$(node -e '
+            const tag = process.argv[1].trim().replace(/^v/i, "");
+            const m = tag.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(-[0-9A-Za-z.-]+)?$/);
+            if (!m) {
+              console.error(`Tag "${process.argv[1]}" ist keine Version. Beispiel: v1.0.0 oder 1.0`);
+              process.exit(1);
+            }
+            console.log(`${m[1]}.${m[2] ?? 0}.${m[3] ?? 0}${m[4] ?? ""}`);
+          ' "$TAG")
           node -e '
             const fs = require("fs");
             const file = "src-tauri/tauri.conf.json";
@@ -56,7 +65,7 @@ jobs:
             conf.version = process.argv[1];
             fs.writeFileSync(file, JSON.stringify(conf, null, 2) + "\n");
           ' "$VERSION"
-          echo "Version: $VERSION"
+          echo "Tag: $TAG → Version: $VERSION"
 
       - uses: tauri-apps/tauri-action@action-v1.0.0
         env:
