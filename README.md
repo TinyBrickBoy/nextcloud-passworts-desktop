@@ -62,7 +62,15 @@ npm run tauri build    # Installer bauen (.deb, .rpm, .AppImage bzw. .msi, .exe)
 cd src-tauri && cargo test --release   # Krypto Tests
 ```
 
-Der GitHub Actions Workflow baut Installer für Linux und Windows und hängt sie als Artefakte an.
+Der Workflow `Build` testet jeden Pull Request und baut die Installer als Artefakte.
+
+## Release erstellen
+
+1. Auf GitHub unter **Releases → Draft a new release** einen neuen Tag anlegen, z. B. `v0.2.0`
+   (Semver mit optionalem `v`, also `v1.2.3`, nicht `v1.2`).
+2. **Publish release** klicken.
+3. Der Workflow `Release` übernimmt die Version aus dem Tag, baut für Linux und Windows und hängt
+   `.deb`, `.rpm`, `.AppImage`, `.msi` und `.exe` an den Release. Das dauert etwa 10 bis 15 Minuten.
 
 ## Aufbau
 
