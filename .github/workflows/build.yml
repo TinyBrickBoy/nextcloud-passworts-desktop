@@ -7,13 +7,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    # Eigener Runner (epyc-runner)
+    runs-on: [self-hosted, Linux, X64, epyc]
     steps:
       - uses: actions/checkout@v4
       - name: Linux Abhängigkeiten
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+          # Auf dem eigenen Runner läuft der Job evtl. als root ohne sudo.
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -33,15 +36,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - name: linux
+            runner: [self-hosted, Linux, X64, epyc]
+          - name: windows
+            runner: windows-latest
+    name: bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Linux Abhängigkeiten
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+          # Auf dem eigenen Runner läuft der Job evtl. als root ohne sudo.
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -54,7 +64,7 @@ jobs:
       - run: npx tauri build
       - uses: actions/upload-artifact@v4
         with:
-          name: passwords-${{ runner.os }}
+          name: passwords-${{ matrix.name }}
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm

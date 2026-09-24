@@ -183,8 +183,38 @@ pub struct TokenInfo {
 pub struct SessionOpen {
     #[serde(default)]
     pub success: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "map_or_empty")]
     pub keys: std::collections::HashMap<String, String>,
+}
+
+/// PHP kodiert ein leeres assoziatives Array als `[]`. Ohne Verschlüsselung liefert
+/// `session/open` deshalb `"keys": []` statt eines Objekts.
+fn map_or_empty<'de, D>(deserializer: D) -> Result<std::collections::HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Value::deserialize(deserializer)? {
+        Value::Object(map) => serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom),
+        _ => Ok(Default::default()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_open_accepts_empty_array_keys() {
+        let open: SessionOpen = serde_json::from_str(r#"{"success":true,"keys":[]}"#).unwrap();
+        assert!(open.success);
+        assert!(open.keys.is_empty());
+    }
+
+    #[test]
+    fn session_open_reads_keychains() {
+        let open: SessionOpen = serde_json::from_str(r#"{"success":true,"keys":{"CSEv1r1":"abc"}}"#).unwrap();
+        assert_eq!(open.keys["CSEv1r1"], "abc");
+    }
 }
 
 #[derive(Deserialize)]
