@@ -49,6 +49,29 @@ Runs on Linux and Windows.
 Installers for Linux (`.deb`, `.rpm`, `.AppImage`) and Windows (`.msi`, `.exe`) are attached to every
 [release](https://github.com/TinyBrickBoy/nextcloud-passworts-desktop/releases).
 
+### Verifying a download
+
+Installer files from releases published after the attestation workflow was introduced are built by the
+`Release` workflow on fresh GitHub hosted runners and come with a
+[GitHub Attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations).
+Earlier releases do not have these attestations.
+With the [GitHub CLI](https://cli.github.com) you can check that a file was built from this repository by that workflow:
+
+```sh
+gh attestation verify Passwords_2.0.0_amd64.AppImage -R TinyBrickBoy/nextcloud-passworts-desktop \
+  --signer-workflow TinyBrickBoy/nextcloud-passworts-desktop/.github/workflows/release.yml
+```
+
+### Troubleshooting on Linux
+
+- The AppImage needs FUSE 2: `sudo apt install libfuse2` (on Ubuntu 24.04 and newer the package is `libfuse2t64`).
+  Without FUSE it can be started with `APPIMAGE_EXTRACT_AND_RUN=1 ./Passwords_*.AppImage`.
+- Messages like `Failed to load module ... libgvfsdbus.so` or `canberra-gtk-module` are harmless warnings.
+- For AppImage launches (detected via `APPIMAGE` or `APPDIR`), the app disables the WebKitGTK DMA-BUF renderer by default, because it can fail with
+  `Could not create default EGL display: EGL_BAD_PARAMETER` in virtual machines and on some graphics drivers.
+  Any user-set `WEBKIT_DISABLE_DMABUF_RENDERER` value is preserved. Set it to `0` to turn the renderer back on,
+  or to `1` to apply the workaround to other Linux installations affected by this error.
+
 ## Tech stack
 
 | Part | Choice | Why |
@@ -75,8 +98,11 @@ Requirements: Node.js 22, Rust (stable) and the [Tauri prerequisites](https://ta
 On Debian/Ubuntu:
 
 ```sh
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+sudo apt install build-essential curl wget file xdg-utils dpkg-dev libfuse2 \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
 ```
+
+On Ubuntu 24.04 and newer replace `libfuse2` with `libfuse2t64`.
 
 ```sh
 npm install
@@ -84,6 +110,14 @@ npm run tauri dev      # start the app with hot reload
 npm run tauri build    # build installers (.deb, .rpm, .AppImage or .msi, .exe)
 npm run check          # type check the UI
 cd src-tauri && cargo test --release   # Rust tests
+```
+
+Building the AppImage on newer distributions (e.g. Ubuntu 24.04+, Fedora, Arch) needs two extra variables:
+`APPIMAGE_EXTRACT_AND_RUN=1` lets the AppImage tools run without FUSE (containers, VMs), and `NO_STRIP=true`
+skips the `strip` bundled with linuxdeploy, which is too old for the system libraries and fails.
+
+```sh
+APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=true npm run tauri build -- --verbose
 ```
 
 The `Build` workflow tests every pull request and builds the installers as artifacts.
@@ -99,8 +133,9 @@ The `Build` workflow tests every pull request and builds the installers as artif
 1. On GitHub go to **Releases → Draft a new release** and create a new tag, e.g. `v0.2.0`
    (`v1.2.3`; short tags like `v1.0` or `2` are completed to `1.0.0` or `2.0.0`).
 2. Click **Publish release**.
-3. The `Release` workflow takes the version from the tag, builds for Linux and Windows and attaches
-   `.deb`, `.rpm`, `.AppImage`, `.msi` and `.exe` to the release. This takes about 10 to 15 minutes.
+3. The `Release` workflow takes the version from the tag, builds for Linux (Ubuntu 22.04) and Windows on
+   GitHub hosted runners, attaches `.deb`, `.rpm`, `.AppImage`, `.msi` and `.exe` to the release and creates an
+   attestation for each file. This takes about 10 to 15 minutes.
 
 ## Project layout
 
