@@ -51,12 +51,15 @@ Installers for Linux (`.deb`, `.rpm`, `.AppImage`) and Windows (`.msi`, `.exe`) 
 
 ### Verifying a download
 
-Every file of a release is built by the `Release` workflow on a fresh GitHub hosted runner and comes with a
+Installer files from releases published after the attestation workflow was introduced are built by the
+`Release` workflow on fresh GitHub hosted runners and come with a
 [GitHub Attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations).
+Earlier releases do not have these attestations.
 With the [GitHub CLI](https://cli.github.com) you can check that a file was built from this repository by that workflow:
 
 ```sh
-gh attestation verify Passwords_2.0.0_amd64.AppImage -R TinyBrickBoy/nextcloud-passworts-desktop
+gh attestation verify Passwords_2.0.0_amd64.AppImage -R TinyBrickBoy/nextcloud-passworts-desktop \
+  --signer-workflow TinyBrickBoy/nextcloud-passworts-desktop/.github/workflows/release.yml
 ```
 
 ### Troubleshooting on Linux
@@ -64,9 +67,10 @@ gh attestation verify Passwords_2.0.0_amd64.AppImage -R TinyBrickBoy/nextcloud-p
 - The AppImage needs FUSE 2: `sudo apt install libfuse2` (on Ubuntu 24.04 and newer the package is `libfuse2t64`).
   Without FUSE it can be started with `APPIMAGE_EXTRACT_AND_RUN=1 ./Passwords_*.AppImage`.
 - Messages like `Failed to load module ... libgvfsdbus.so` or `canberra-gtk-module` are harmless warnings.
-- The app disables the WebKitGTK DMA-BUF renderer by default, because it fails with
+- For AppImage launches (detected via `APPIMAGE` or `APPDIR`), the app disables the WebKitGTK DMA-BUF renderer by default, because it can fail with
   `Could not create default EGL display: EGL_BAD_PARAMETER` in virtual machines and on some graphics drivers.
-  Start it with `WEBKIT_DISABLE_DMABUF_RENDERER=0` to turn it back on.
+  Any user-set `WEBKIT_DISABLE_DMABUF_RENDERER` value is preserved. Set it to `0` to turn the renderer back on,
+  or to `1` to apply the workaround to other Linux installations affected by this error.
 
 ## Tech stack
 
