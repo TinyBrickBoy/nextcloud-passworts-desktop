@@ -5,6 +5,7 @@ pub mod clipboard;
 pub mod crypto;
 pub mod generator;
 pub mod i18n;
+pub mod quick_unlock;
 pub mod settings;
 pub mod vault;
 
@@ -136,6 +137,52 @@ fn set_settings(state: State<'_, AppState>, settings: Settings, system_lang: Opt
 }
 
 #[tauri::command]
+fn biometric_available() -> bool {
+    quick_unlock::is_biometric_available()
+}
+
+fn set_quick_unlock_mode(state: &State<'_, AppState>, mode: &str) -> CmdResult<()> {
+    let mut guard = state.settings.lock().unwrap();
+    let mut updated = guard.clone();
+    updated.quick_unlock = mode.into();
+    updated.save(&state.config_dir)?;
+    *guard = updated;
+    Ok(())
+}
+
+#[tauri::command]
+fn setup_biometric(state: State<'_, AppState>, password: String) -> CmdResult<()> {
+    let password = Zeroizing::new(password);
+    let account = state.account()?;
+    quick_unlock::store_biometric(&account.server, &account.user, &password)?;
+    quick_unlock::remove_pin(&state.config_dir);
+    set_quick_unlock_mode(&state, "biometric")
+}
+
+#[tauri::command]
+fn setup_pin(state: State<'_, AppState>, password: String, pin: String) -> CmdResult<()> {
+    let password = Zeroizing::new(password);
+    let pin = Zeroizing::new(pin);
+    if !(4..=8).contains(&pin.len()) || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return Err("PIN must be 4 to 8 digits".into());
+    }
+    quick_unlock::store_pin(&state.config_dir, &password, &pin)?;
+    if let Ok(account) = state.account() {
+        quick_unlock::remove_biometric(&account.server, &account.user);
+    }
+    set_quick_unlock_mode(&state, "pin")
+}
+
+#[tauri::command]
+fn remove_quick_unlock(state: State<'_, AppState>) -> CmdResult<()> {
+    if let Ok(account) = state.account() {
+        quick_unlock::remove_biometric(&account.server, &account.user);
+    }
+    quick_unlock::remove_pin(&state.config_dir);
+    set_quick_unlock_mode(&state, "off")
+}
+
+#[tauri::command]
 async fn login_browser(app: tauri::AppHandle, state: State<'_, AppState>, server: String) -> CmdResult<Account> {
     let server = account::normalize_server(&server)?;
     state.login_cancelled.store(false, Ordering::SeqCst);
@@ -174,8 +221,10 @@ async fn login_manual(state: State<'_, AppState>, server: String, user: String, 
 async fn logout(state: State<'_, AppState>) -> CmdResult<()> {
     lock(state.clone()).await?;
     if let Some(account) = Account::load(&state.config_dir) {
+        quick_unlock::remove_biometric(&account.server, &account.user);
         account.remove(&state.config_dir);
     }
+    quick_unlock::remove_pin(&state.config_dir);
     cache::delete_cache(&state.config_dir);
     Ok(())
 }
@@ -338,8 +387,25 @@ async fn unlock_offline(
 }
 
 #[tauri::command]
-async fn unlock(state: State<'_, AppState>, password: Option<String>, token: Option<TokenInput>) -> CmdResult<VaultView> {
-    let password = password.map(Zeroizing::new);
+async fn unlock(
+    state: State<'_, AppState>,
+    password: Option<String>,
+    token: Option<TokenInput>,
+    quick_unlock: Option<String>,
+) -> CmdResult<VaultView> {
+    let mut password = password.map(Zeroizing::new);
+    if let Some(value) = quick_unlock.map(Zeroizing::new).filter(|v| !v.is_empty()) {
+        let mode = state.settings.lock().unwrap().quick_unlock.clone();
+        let retrieved = match mode.as_str() {
+            "pin" => crate::quick_unlock::retrieve_pin(&state.config_dir, &value)?,
+            "biometric" => {
+                let account = state.account()?;
+                crate::quick_unlock::retrieve_biometric(&account.server, &account.user)?
+            }
+            _ => return Err("Quick unlock is not enabled".into()),
+        };
+        password = Some(retrieved);
+    }
     match unlock_online(&state, &password, token).await {
         Ok(online) => {
             let Online { api, vault, raw, needs_password, keys } = online;
@@ -628,6 +694,10 @@ pub fn run() {
             favicon,
             set_settings,
             set_system_language,
+            biometric_available,
+            setup_biometric,
+            setup_pin,
+            remove_quick_unlock,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");
