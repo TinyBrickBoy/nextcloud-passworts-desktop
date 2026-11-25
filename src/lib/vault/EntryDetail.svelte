@@ -241,10 +241,11 @@
     display: flex;
     align-items: flex-start;
     gap: 16px;
+    flex-wrap: wrap;
   }
   .heading {
     flex: 1;
-    min-width: 0;
+    min-width: 120px;
     display: flex;
     flex-direction: column;
     gap: 6px;

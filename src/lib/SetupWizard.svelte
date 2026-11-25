@@ -302,6 +302,7 @@
   .text {
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-width: 0;
   }
   .text span {
