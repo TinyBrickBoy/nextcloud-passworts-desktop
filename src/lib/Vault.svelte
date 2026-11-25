@@ -386,6 +386,7 @@
   }
   .content {
     min-width: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     padding: 32px 40px;
   }
@@ -425,6 +426,11 @@
     font-size: 12px;
     text-align: left;
   }
+  @media (max-width: 900px) {
+    .shortcuts {
+      grid-template-columns: auto;
+    }
+  }
   .shortcuts span {
     display: flex;
     align-items: center;
@@ -439,7 +445,15 @@
       grid-template-columns: 200px minmax(220px, 280px) minmax(0, 1fr);
     }
     .content {
-      padding: 24px;
+      padding: 24px 16px;
+    }
+  }
+  @media (max-width: 700px) {
+    .layout {
+      grid-template-columns: 200px minmax(180px, 240px) minmax(0, 1fr);
+    }
+    .content {
+      padding: 20px 12px;
     }
   }
 </style>

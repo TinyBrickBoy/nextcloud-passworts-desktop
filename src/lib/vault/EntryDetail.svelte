@@ -262,6 +262,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    min-width: 0;
   }
   .link {
     height: 22px;
@@ -272,6 +273,9 @@
     color: hsl(var(--muted-foreground));
     font-weight: 400;
     margin-right: 4px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .link:hover:not(:disabled) {
     background: none;
@@ -292,14 +296,24 @@
   }
   .fields {
     padding: 4px 0;
+    container-type: inline-size;
   }
   .field {
     display: grid;
-    grid-template-columns: 140px 1fr auto;
+    grid-template-columns: minmax(100px, auto) 1fr auto;
     align-items: center;
     gap: 12px;
     min-height: 52px;
     padding: 6px 12px 6px 18px;
+  }
+  @container (max-width: 320px) {
+    .field {
+      grid-template-columns: 1fr auto;
+      gap: 2px 8px;
+    }
+    .name {
+      grid-column: 1 / -1;
+    }
   }
   .field + .field {
     border-top: 1px solid hsl(var(--border));
@@ -315,6 +329,10 @@
   .value.secret {
     letter-spacing: 0.1em;
     color: hsl(var(--muted-foreground));
+    overflow-wrap: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .tools {
     display: flex;
