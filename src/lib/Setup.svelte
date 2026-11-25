@@ -117,12 +117,4 @@
     color: hsl(var(--muted-foreground));
     margin-top: -6px;
   }
-  :global(.spin) {
-    animation: spin 0.9s linear infinite;
-  }
-  @keyframes -global-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
 </style>

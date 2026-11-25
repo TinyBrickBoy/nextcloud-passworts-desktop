@@ -19,6 +19,23 @@ pub struct Settings {
     pub favicons: bool,
     /// Sortierung der Liste: "name" oder "edited"
     pub sort: String,
+    /// Verschlüsselte Kopie des Tresors lokal vorhalten
+    #[serde(default)]
+    pub offline_cache: bool,
+    /// Schnellentsperren: "off", "biometric" oder "pin"
+    #[serde(default = "default_quick_unlock")]
+    pub quick_unlock: String,
+    /// Einrichtungsassistent abgeschlossen (Bestandsnutzer überspringen ihn)
+    #[serde(default = "default_true")]
+    pub setup_done: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_quick_unlock() -> String {
+    "off".into()
 }
 
 impl Default for Settings {
@@ -30,6 +47,9 @@ impl Default for Settings {
             clipboard_seconds: 30,
             favicons: true,
             sort: "name".into(),
+            offline_cache: false,
+            quick_unlock: "off".into(),
+            setup_done: false,
         }
     }
 }
@@ -46,5 +66,18 @@ impl Settings {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
         std::fs::write(dir.join("settings.json"), json).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_settings_get_new_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"language":"de"}"#).unwrap();
+        assert_eq!(s.quick_unlock, "off");
+        assert!(s.setup_done);
+        assert!(!s.offline_cache);
     }
 }

@@ -25,6 +25,7 @@
     vault,
     trashMode,
     busy,
+    offline = false,
     onEdit,
     onDelete,
     onRestore,
@@ -34,6 +35,7 @@
     vault: VaultView;
     trashMode: boolean;
     busy: boolean;
+    offline?: boolean;
     onEdit: () => void;
     onDelete: () => void;
     onRestore: () => void;
@@ -131,23 +133,23 @@
     </div>
     <div class="actions">
       {#if trashMode}
-        <button onclick={onRestore} disabled={busy}><RotateCcw size={15} />{t("restore")}</button>
-        <button class="danger" onclick={onDelete} disabled={busy}><Trash2 size={15} />{t("delete_forever")}</button>
+        <button onclick={onRestore} disabled={busy || offline}><RotateCcw size={15} />{t("restore")}</button>
+        <button class="danger" onclick={onDelete} disabled={busy || offline}><Trash2 size={15} />{t("delete_forever")}</button>
       {:else}
         <button
           class="icon fav"
           class:active={entry.favorite}
           onclick={onFavorite}
-          disabled={busy}
+          disabled={busy || offline}
           aria-label={entry.favorite ? t("unfavorite") : t("favorite")}
           title={entry.favorite ? t("unfavorite") : t("favorite")}
         >
           <Star size={17} />
         </button>
         {#if entry.editable}
-          <button onclick={onEdit} title="{t('edit')} (Ctrl+E)"><Pencil size={15} />{t("edit")}</button>
+          <button onclick={onEdit} disabled={offline} title="{t('edit')} (Ctrl+E)"><Pencil size={15} />{t("edit")}</button>
         {/if}
-        <button class="icon" onclick={onDelete} disabled={busy} aria-label={t("move_to_trash")} title={t("move_to_trash")}>
+        <button class="icon" onclick={onDelete} disabled={busy || offline} aria-label={t("move_to_trash")} title={t("move_to_trash")}>
           <Trash2 size={16} />
         </button>
       {/if}
@@ -239,10 +241,11 @@
     display: flex;
     align-items: flex-start;
     gap: 16px;
+    flex-wrap: wrap;
   }
   .heading {
     flex: 1;
-    min-width: 0;
+    min-width: 120px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -259,6 +262,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    min-width: 0;
   }
   .link {
     height: 22px;
@@ -269,6 +273,9 @@
     color: hsl(var(--muted-foreground));
     font-weight: 400;
     margin-right: 4px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .link:hover:not(:disabled) {
     background: none;
@@ -289,14 +296,24 @@
   }
   .fields {
     padding: 4px 0;
+    container-type: inline-size;
   }
   .field {
     display: grid;
-    grid-template-columns: 140px 1fr auto;
+    grid-template-columns: minmax(100px, auto) 1fr auto;
     align-items: center;
     gap: 12px;
     min-height: 52px;
     padding: 6px 12px 6px 18px;
+  }
+  @container (max-width: 320px) {
+    .field {
+      grid-template-columns: 1fr auto;
+      gap: 2px 8px;
+    }
+    .name {
+      grid-column: 1 / -1;
+    }
   }
   .field + .field {
     border-top: 1px solid hsl(var(--border));
@@ -312,6 +329,10 @@
   .value.secret {
     letter-spacing: 0.1em;
     color: hsl(var(--muted-foreground));
+    overflow-wrap: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .tools {
     display: flex;

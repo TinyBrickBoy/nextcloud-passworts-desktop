@@ -4,13 +4,14 @@
   import { systemLanguage } from "./lib/i18n.svelte";
   import { applySettings, ui } from "./lib/store.svelte";
   import Setup from "./lib/Setup.svelte";
+  import SetupWizard from "./lib/SetupWizard.svelte";
   import Unlock from "./lib/Unlock.svelte";
   import Vault from "./lib/Vault.svelte";
   import DialogHost from "./lib/components/DialogHost.svelte";
   import Toast from "./lib/components/Toast.svelte";
   import { clearFaviconCache } from "./lib/components/Avatar.svelte";
 
-  let screen = $state<"loading" | "setup" | "unlock" | "vault">("loading");
+  let screen = $state<"loading" | "setup" | "unlock" | "wizard" | "vault">("loading");
   let account = $state<Account | null>(null);
   let vault = $state<VaultView | null>(null);
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -53,7 +54,7 @@
 
   function onUnlocked(v: VaultView) {
     vault = v;
-    screen = "vault";
+    screen = ui.settings.setupDone ? "vault" : "wizard";
   }
 
   async function lock() {
@@ -78,6 +79,8 @@
   <Setup {onLoggedIn} />
 {:else if screen === "unlock" && account}
   <Unlock {account} {onUnlocked} onLogout={logout} />
+{:else if screen === "wizard" && vault && account}
+  <SetupWizard {account} {vault} onDone={() => (screen = "vault")} />
 {:else if screen === "vault" && vault && account}
   <Vault bind:vault {account} onLock={lock} onLogout={logout} />
 {/if}

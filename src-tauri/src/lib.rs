@@ -1,9 +1,11 @@
 pub mod account;
 pub mod api;
+pub mod cache;
 pub mod clipboard;
 pub mod crypto;
 pub mod generator;
 pub mod i18n;
+pub mod quick_unlock;
 pub mod settings;
 pub mod vault;
 
@@ -22,7 +24,8 @@ use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
 use account::Account;
-use api::{Api, TokenInfo};
+use api::{Api, RawVaultData, TokenInfo};
+use cache::CachePayload;
 use clipboard::Clipboard;
 use crypto::{Keychain, CSE_TYPE};
 use i18n::t;
@@ -45,6 +48,8 @@ struct AppState {
     /// Favicons nur im Arbeitsspeicher, damit keine Liste der Webseiten auf der Platte landet.
     favicons: StdMutex<HashMap<String, Option<String>>>,
     favicon_gate: Mutex<Option<Instant>>,
+    /// Verschluesselte Keychains und Passwort Anforderung der laufenden Online Sitzung, fuer den Cache.
+    cache_meta: StdMutex<Option<(bool, HashMap<String, String>)>>,
 }
 
 impl AppState {
@@ -56,6 +61,35 @@ impl AppState {
         let account = self.account()?;
         let password = Zeroizing::new(account.app_password()?);
         Api::new(&account.server, &account.user, &password).map_err(|e| e.to_string())
+    }
+
+    /// Schreibt den Offline Cache im Hintergrund, falls aktiviert.
+    fn write_cache_async(&self, raw: RawVaultData, needs_password: bool, keychains: HashMap<String, String>) {
+        if !self.settings.lock().unwrap().offline_cache {
+            return;
+        }
+        let Ok(account) = self.account() else { return };
+        let Ok(app_password) = account.app_password().map(Zeroizing::new) else { return };
+        let dir = self.config_dir.clone();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let payload = CachePayload {
+            version: 1,
+            timestamp,
+            needs_password,
+            keychains,
+            passwords: raw.passwords,
+            trashed: raw.trashed,
+            folders: raw.folders,
+            tags: raw.tags,
+        };
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(e) = cache::write_cache(&dir, &app_password, &payload) {
+                eprintln!("cache write failed: {e}");
+            }
+        });
     }
 
     fn stop_keepalive(&self) {
@@ -103,6 +137,52 @@ fn set_settings(state: State<'_, AppState>, settings: Settings, system_lang: Opt
 }
 
 #[tauri::command]
+fn biometric_available() -> bool {
+    quick_unlock::is_biometric_available()
+}
+
+fn set_quick_unlock_mode(state: &State<'_, AppState>, mode: &str) -> CmdResult<()> {
+    let mut guard = state.settings.lock().unwrap();
+    let mut updated = guard.clone();
+    updated.quick_unlock = mode.into();
+    updated.save(&state.config_dir)?;
+    *guard = updated;
+    Ok(())
+}
+
+#[tauri::command]
+fn setup_biometric(state: State<'_, AppState>, password: String) -> CmdResult<()> {
+    let password = Zeroizing::new(password);
+    let account = state.account()?;
+    quick_unlock::store_biometric(&account.server, &account.user, &password)?;
+    quick_unlock::remove_pin(&state.config_dir);
+    set_quick_unlock_mode(&state, "biometric")
+}
+
+#[tauri::command]
+fn setup_pin(state: State<'_, AppState>, password: String, pin: String) -> CmdResult<()> {
+    let password = Zeroizing::new(password);
+    let pin = Zeroizing::new(pin);
+    if !(4..=8).contains(&pin.len()) || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return Err("PIN must be 4 to 8 digits".into());
+    }
+    quick_unlock::store_pin(&state.config_dir, &password, &pin)?;
+    if let Ok(account) = state.account() {
+        quick_unlock::remove_biometric(&account.server, &account.user);
+    }
+    set_quick_unlock_mode(&state, "pin")
+}
+
+#[tauri::command]
+fn remove_quick_unlock(state: State<'_, AppState>) -> CmdResult<()> {
+    if let Ok(account) = state.account() {
+        quick_unlock::remove_biometric(&account.server, &account.user);
+    }
+    quick_unlock::remove_pin(&state.config_dir);
+    set_quick_unlock_mode(&state, "off")
+}
+
+#[tauri::command]
 async fn login_browser(app: tauri::AppHandle, state: State<'_, AppState>, server: String) -> CmdResult<Account> {
     let server = account::normalize_server(&server)?;
     state.login_cancelled.store(false, Ordering::SeqCst);
@@ -141,8 +221,11 @@ async fn login_manual(state: State<'_, AppState>, server: String, user: String, 
 async fn logout(state: State<'_, AppState>) -> CmdResult<()> {
     lock(state.clone()).await?;
     if let Some(account) = Account::load(&state.config_dir) {
+        quick_unlock::remove_biometric(&account.server, &account.user);
         account.remove(&state.config_dir);
     }
+    quick_unlock::remove_pin(&state.config_dir);
+    cache::delete_cache(&state.config_dir);
     Ok(())
 }
 
@@ -155,8 +238,59 @@ struct UnlockRequirements {
 
 #[tauri::command]
 async fn unlock_requirements(state: State<'_, AppState>) -> CmdResult<UnlockRequirements> {
-    let requirements = state.api()?.session_request().await.map_err(|e| e.to_string())?;
-    Ok(UnlockRequirements { needs_password: requirements.challenge.is_some(), tokens: requirements.token })
+    match state.api()?.session_request().await {
+        Ok(requirements) => {
+            Ok(UnlockRequirements { needs_password: requirements.challenge.is_some(), tokens: requirements.token })
+        }
+        Err(api::ApiError::Network(detail)) => {
+            let original = api::ApiError::Network(detail).to_string();
+            let cached = read_cache_blocking(&state).await.map_err(|_| original)?;
+            Ok(UnlockRequirements { needs_password: cached.needs_password, tokens: vec![] })
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Liest den Offline Cache (Argon2, daher im Blocking Thread).
+async fn read_cache_blocking(state: &AppState) -> CmdResult<CachePayload> {
+    let app_password = Zeroizing::new(state.account()?.app_password()?);
+    let dir = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || cache::read_cache(&dir, &app_password))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Ergebnis des Online Pfads von `unlock`.
+struct Online {
+    api: Arc<Api>,
+    vault: Vault,
+    raw: RawVaultData,
+    needs_password: bool,
+    keys: HashMap<String, String>,
+}
+
+/// Fehler des Online Pfads; `network` markiert Verbindungsprobleme (Offline Fallback moeglich).
+struct OnlineError {
+    message: String,
+    network: bool,
+}
+
+impl From<String> for OnlineError {
+    fn from(message: String) -> Self {
+        Self { message, network: false }
+    }
+}
+
+impl From<&str> for OnlineError {
+    fn from(message: &str) -> Self {
+        Self::from(message.to_string())
+    }
+}
+
+impl From<api::ApiError> for OnlineError {
+    fn from(e: api::ApiError) -> Self {
+        Self { network: matches!(e, api::ApiError::Network(_)), message: e.to_string() }
+    }
 }
 
 #[derive(Deserialize)]
@@ -165,16 +299,18 @@ struct TokenInput {
     code: String,
 }
 
-#[tauri::command]
-async fn unlock(state: State<'_, AppState>, password: Option<String>, token: Option<TokenInput>) -> CmdResult<VaultView> {
-    let password = password.map(Zeroizing::new);
+async fn unlock_online(
+    state: &AppState,
+    password: &Option<Zeroizing<String>>,
+    token: Option<TokenInput>,
+) -> Result<Online, OnlineError> {
     let api = Arc::new(state.api()?);
-    let requirements = api.session_request().await.map_err(|e| e.to_string())?;
+    let requirements = api.session_request().await?;
 
-    let solution = match (&requirements.challenge, &password) {
+    let solution = match (&requirements.challenge, password) {
         (Some(challenge), Some(password)) => {
             if challenge.kind != "PWDv1r1" {
-                return Err(format!("{} ({})", t("challenge_unsupported"), challenge.kind));
+                return Err(format!("{} ({})", t("challenge_unsupported"), challenge.kind).into());
             }
             let password = password.clone();
             let salts = challenge.salts.clone();
@@ -194,16 +330,18 @@ async fn unlock(state: State<'_, AppState>, password: Option<String>, token: Opt
         .session_open(solution, token.map(|t| (t.id, t.code.trim().to_string())))
         .await
         .map_err(|e| match e {
-            api::ApiError::Server(message) => format!("{}: {message}", t("unlock_failed")),
-            other => other.to_string(),
+            api::ApiError::Server(message) => OnlineError::from(format!("{}: {message}", t("unlock_failed"))),
+            other => other.into(),
         })?;
     if !opened.success {
         return Err(t("unlock_failed").into());
     }
 
+    let keys = opened.keys.clone();
     let keychain = match (opened.keys.get(CSE_TYPE), password) {
         (Some(encrypted), Some(password)) => {
             let encrypted = encrypted.clone();
+            let password = password.clone();
             Some(
                 tauri::async_runtime::spawn_blocking(move || Keychain::decrypt(&encrypted, &password))
                     .await
@@ -214,21 +352,89 @@ async fn unlock(state: State<'_, AppState>, password: Option<String>, token: Opt
         _ => None,
     };
 
-    let lockable = requirements.challenge.is_some() || !requirements.token.is_empty();
+    let needs_password = requirements.challenge.is_some();
+    let lockable = needs_password || !requirements.token.is_empty();
     let mut vault = Vault::new(api.clone(), keychain, lockable);
-    vault.refresh().await?;
-    let view = vault.view();
-    *state.vault.lock().await = Some(vault);
+    // `fetch_all` Fehler kommen als Text; Netzwerkfehler tragen das uebersetzte Praefix.
+    let raw = vault.refresh().await.map_err(|message| OnlineError {
+        network: message.starts_with(t("network")),
+        message,
+    })?;
+    let raw = raw.ok_or_else(|| OnlineError::from("vault is offline"))?;
+    Ok(Online { api, vault, raw, needs_password, keys })
+}
 
-    state.stop_keepalive();
-    let handle = tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(KEEPALIVE_EVERY).await;
-            let _ = api.keepalive().await;
+async fn unlock_offline(
+    state: &AppState,
+    password: &Option<Zeroizing<String>>,
+) -> CmdResult<Vault> {
+    let payload = read_cache_blocking(state).await?;
+    let lockable = payload.needs_password;
+    let keychain = match (payload.keychains.get(CSE_TYPE), password) {
+        (Some(encrypted), Some(password)) => {
+            let encrypted = encrypted.clone();
+            let password = password.clone();
+            Some(
+                tauri::async_runtime::spawn_blocking(move || Keychain::decrypt(&encrypted, &password))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?,
+            )
         }
-    });
-    *state.keepalive.lock().unwrap() = Some(handle);
-    Ok(view)
+        _ => None,
+    };
+    Vault::from_cache(payload, keychain, lockable)
+}
+
+#[tauri::command]
+async fn unlock(
+    state: State<'_, AppState>,
+    password: Option<String>,
+    token: Option<TokenInput>,
+    quick_unlock: Option<String>,
+) -> CmdResult<VaultView> {
+    let mut password = password.map(Zeroizing::new);
+    if let Some(value) = quick_unlock.map(Zeroizing::new).filter(|v| !v.is_empty()) {
+        let mode = state.settings.lock().unwrap().quick_unlock.clone();
+        let retrieved = match mode.as_str() {
+            "pin" => crate::quick_unlock::retrieve_pin(&state.config_dir, &value)?,
+            "biometric" => {
+                let account = state.account()?;
+                crate::quick_unlock::retrieve_biometric(&account.server, &account.user)?
+            }
+            _ => return Err("Quick unlock is not enabled".into()),
+        };
+        password = Some(retrieved);
+    }
+    match unlock_online(&state, &password, token).await {
+        Ok(online) => {
+            let Online { api, vault, raw, needs_password, keys } = online;
+            state.write_cache_async(raw, needs_password, keys.clone());
+            *state.cache_meta.lock().unwrap() = Some((needs_password, keys));
+            let view = vault.view();
+            *state.vault.lock().await = Some(vault);
+
+            state.stop_keepalive();
+            let handle = tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(KEEPALIVE_EVERY).await;
+                    let _ = api.keepalive().await;
+                }
+            });
+            *state.keepalive.lock().unwrap() = Some(handle);
+            Ok(view)
+        }
+        Err(e) if e.network => {
+            // Offline: Fehler des Offline-Entsperrens unveraendert weiterreichen.
+            let vault = unlock_offline(&state, &password).await?;
+            let view = vault.view();
+            state.stop_keepalive();
+            *state.cache_meta.lock().unwrap() = None;
+            *state.vault.lock().await = Some(vault);
+            Ok(view)
+        }
+        Err(e) => Err(e.message),
+    }
 }
 
 #[tauri::command]
@@ -259,7 +465,13 @@ macro_rules! mutate {
 #[tauri::command]
 async fn refresh(state: State<'_, AppState>) -> CmdResult<VaultView> {
     let (result, view) = mutate!(state, |vault| vault.refresh().await);
-    result.map(|_| view)
+    if let Some(raw) = result? {
+        let meta = state.cache_meta.lock().unwrap().clone();
+        if let Some((needs_password, keys)) = meta {
+            state.write_cache_async(raw, needs_password, keys);
+        }
+    }
+    Ok(view)
 }
 
 #[tauri::command]
@@ -446,6 +658,7 @@ pub fn run() {
                 settings: StdMutex::new(settings.clone()),
                 favicons: StdMutex::new(HashMap::new()),
                 favicon_gate: Mutex::new(None),
+                cache_meta: StdMutex::new(None),
             };
             apply_settings(&state, &settings, None);
             app.manage(state);
@@ -481,6 +694,10 @@ pub fn run() {
             favicon,
             set_settings,
             set_system_language,
+            biometric_available,
+            setup_biometric,
+            setup_pin,
+            remove_quick_unlock,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

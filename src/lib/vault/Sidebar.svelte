@@ -21,6 +21,7 @@
     account,
     filter = $bindable(),
     busy,
+    offline,
     onCreateFolder,
     onRenameFolder,
     onDeleteFolder,
@@ -35,6 +36,7 @@
     account: Account;
     filter: string;
     busy: boolean;
+    offline: boolean;
     onCreateFolder: () => void;
     onRenameFolder: (id: string) => void;
     onDeleteFolder: (id: string) => void;
@@ -81,9 +83,11 @@
 
     <div class="heading">
       <span>{t("folders")}</span>
-      <button class="icon small" onclick={onCreateFolder} aria-label={t("new_folder")} title={t("new_folder")}>
-        <Plus size={14} />
-      </button>
+      {#if !offline}
+        <button class="icon small" onclick={onCreateFolder} aria-label={t("new_folder")} title={t("new_folder")}>
+          <Plus size={14} />
+        </button>
+      {/if}
     </div>
     <div class="group">
       {#each vault.folders as folder (folder.id)}
@@ -96,6 +100,7 @@
             <FolderIcon size={16} /><span class="name">{folder.label}</span>
             <span class="count">{folderCount.get(folder.id) ?? ""}</span>
           </button>
+          {#if !offline}
           <span class="actions">
             <button class="icon small" onclick={() => onRenameFolder(folder.id)} aria-label={t("rename")} title={t("rename")}>
               <Pencil size={13} />
@@ -104,6 +109,7 @@
               <X size={14} />
             </button>
           </span>
+          {/if}
         </div>
       {:else}
         <p class="empty">{t("no_folders")}</p>
@@ -112,9 +118,11 @@
 
     <div class="heading">
       <span>{t("tags")}</span>
-      <button class="icon small" onclick={onCreateTag} aria-label={t("new_tag")} title={t("new_tag")}>
-        <Plus size={14} />
-      </button>
+      {#if !offline}
+        <button class="icon small" onclick={onCreateTag} aria-label={t("new_tag")} title={t("new_tag")}>
+          <Plus size={14} />
+        </button>
+      {/if}
     </div>
     <div class="group">
       {#each vault.tags as tag (tag.id)}
@@ -124,11 +132,13 @@
             <span class="name">{tag.label}</span>
             <span class="count">{tagCount.get(tag.id) ?? ""}</span>
           </button>
+          {#if !offline}
           <span class="actions">
             <button class="icon small" onclick={() => onDeleteTag(tag.id)} aria-label={t("delete")} title={t("delete")}>
               <X size={14} />
             </button>
           </span>
+          {/if}
         </div>
       {:else}
         <p class="empty">{t("no_tags")}</p>
@@ -145,7 +155,10 @@
       </div>
     </div>
     <div class="tools">
-      <button class="icon" onclick={onRefresh} disabled={busy} aria-label={t("refresh")} title={t("refresh")}>
+      <button class="icon" onclick={onRefresh}
+        disabled={busy}
+        aria-label={offline ? t("reconnect") : t("refresh")}
+        title={offline ? t("reconnect") : t("refresh")}>
         <RefreshCw size={16} class={busy ? "spin" : ""} />
       </button>
       <button class="icon" onclick={onSettings} aria-label={t("settings")} title="{t('settings')} (Ctrl+,)">
@@ -234,11 +247,17 @@
     font-variant-numeric: tabular-nums;
   }
   .count.warn {
-    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 1px 6px 0;
     border-radius: 999px;
     color: hsl(var(--warning));
     background: hsl(var(--warning) / 0.12);
     font-weight: 600;
+    line-height: 1;
   }
   .actions {
     position: absolute;
@@ -313,5 +332,11 @@
   .tools {
     display: flex;
     justify-content: space-between;
+  }
+  .tools :global(button) {
+    color: hsl(var(--foreground) / 0.6);
+  }
+  .tools :global(button:hover:not(:disabled)) {
+    color: hsl(var(--foreground));
   }
 </style>

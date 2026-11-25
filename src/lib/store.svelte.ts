@@ -8,6 +8,9 @@ export const defaultSettings: Settings = {
   clipboardSeconds: 30,
   favicons: true,
   sort: "name",
+  offlineCache: false,
+  quickUnlock: "off",
+  setupDone: false,
 };
 
 export const ui = $state({

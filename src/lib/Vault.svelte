@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { KeyRound, TriangleAlert } from "@lucide/svelte";
+  import { KeyRound, TriangleAlert, WifiOff } from "@lucide/svelte";
   import { api, errorText, type Account, type Entry, type VaultView } from "./api";
   import { t } from "./i18n.svelte";
   import { confirmDialog, promptDialog, toast, ui } from "./store.svelte";
@@ -87,12 +87,16 @@
   }
 
   async function refresh() {
+    if (vault.offline) {
+      onLock();
+      return;
+    }
     const v = await run(() => api.refresh(), t("refreshed"));
     if (v) vault = v;
   }
 
   async function deleteSelected() {
-    if (!selected) return;
+    if (!selected || vault.offline) return;
     const forever = trashMode;
     const ok = await confirmDialog({
       title: forever ? t("delete_forever_title") : t("move_to_trash_title"),
@@ -111,7 +115,7 @@
   }
 
   async function restoreSelected() {
-    if (!selected) return;
+    if (!selected || vault.offline) return;
     const v = await run(() => api.restore(selected.id), t("restored"));
     if (v) {
       vault = v;
@@ -120,6 +124,7 @@
   }
 
   async function emptyTrash() {
+    if (vault.offline) return;
     const ok = await confirmDialog({
       title: t("empty_trash_title"),
       message: t("empty_trash_message", { n: vault.trash.length }),
@@ -132,12 +137,13 @@
   }
 
   async function toggleFavorite() {
-    if (!selected) return;
+    if (!selected || vault.offline) return;
     const v = await run(() => api.setFavorite(selected.id, !selected.favorite));
     if (v) vault = v;
   }
 
   async function createFolder() {
+    if (vault.offline) return;
     const label = await promptDialog({ title: t("new_folder"), confirmLabel: t("create"), placeholder: t("folder_name") });
     if (!label) return;
     const result = await run(() => api.createFolder(label, null), t("folder_created"));
@@ -148,6 +154,7 @@
   }
 
   async function renameFolder(id: string) {
+    if (vault.offline) return;
     const folder = vault.folders.find((f) => f.id === id);
     const label = await promptDialog({ title: t("rename_folder"), confirmLabel: t("save"), value: folder?.label });
     if (!label || label === folder?.label) return;
@@ -156,6 +163,7 @@
   }
 
   async function deleteFolder(id: string) {
+    if (vault.offline) return;
     const folder = vault.folders.find((f) => f.id === id);
     const ok = await confirmDialog({
       title: t("delete_folder_title"),
@@ -172,6 +180,7 @@
   }
 
   async function createTag(): Promise<string | null> {
+    if (vault.offline) return null;
     const label = await promptDialog({ title: t("new_tag"), confirmLabel: t("create"), placeholder: t("tag_name") });
     if (!label) return null;
     const color = TAG_COLORS[vault.tags.length % TAG_COLORS.length];
@@ -182,6 +191,7 @@
   }
 
   async function deleteTag(id: string) {
+    if (vault.offline) return;
     const tag = vault.tags.find((x) => x.id === id);
     const ok = await confirmDialog({
       title: t("delete_tag_title"),
@@ -198,6 +208,7 @@
   }
 
   function newEntry() {
+    if (vault.offline) return;
     if (trashMode || filter === "security") filter = "all";
     mode = "new";
   }
@@ -229,7 +240,7 @@
       e.preventDefault();
       searchInput?.focus();
       searchInput?.select();
-    } else if (mod && key === "n") {
+    } else if (mod && key === "n" && !vault.offline) {
       e.preventDefault();
       newEntry();
     } else if (mod && key === "l" && vault.lockable) {
@@ -238,7 +249,7 @@
     } else if (mod && key === ",") {
       e.preventDefault();
       showSettings = true;
-    } else if (mod && key === "e" && selected?.editable && !trashMode) {
+    } else if (mod && key === "e" && selected?.editable && !trashMode && !vault.offline) {
       e.preventDefault();
       mode = "edit";
     } else if (mod && key === "c" && selected && (!inField || target === searchInput) && !window.getSelection()?.toString()) {
@@ -247,7 +258,7 @@
     } else if (mod && key === "b" && selected) {
       e.preventDefault();
       detail?.copy("username");
-    } else if (key === "delete" && selected && !inField) {
+    } else if (key === "delete" && selected && !inField && !vault.offline) {
       e.preventDefault();
       deleteSelected();
     } else if (e.key === "ArrowDown" && (!inField || target === searchInput)) {
@@ -274,6 +285,7 @@
     {account}
     bind:filter
     {busy}
+    offline={vault.offline}
     onCreateFolder={createFolder}
     onRenameFolder={renameFolder}
     onDeleteFolder={deleteFolder}
@@ -300,11 +312,18 @@
     bind:query
     bind:searchInput
     {trashMode}
+    offline={vault.offline}
     onNew={newEntry}
     onEmptyTrash={emptyTrash}
   />
 
   <main class="content">
+    {#if vault.offline}
+      <div class="alert info offline-banner">
+        <WifiOff size={16} /><span>{t("offline_banner")}</span>
+      </div>
+    {/if}
+
     {#if vault.broken > 0}
       <div class="alert warn broken">
         <TriangleAlert size={16} /><span>{t("broken_entries", { n: vault.broken })}</span>
@@ -330,6 +349,7 @@
         {vault}
         {trashMode}
         {busy}
+        offline={vault.offline}
         onEdit={() => (mode = "edit")}
         onDelete={deleteSelected}
         onRestore={restoreSelected}
@@ -355,7 +375,7 @@
 </div>
 
 {#if showSettings}
-  <SettingsDialog {account} lockable={vault.lockable} onClose={() => (showSettings = false)} />
+  <SettingsDialog {account} lockable={vault.lockable} encrypted={vault.encrypted} onClose={() => (showSettings = false)} />
 {/if}
 
 <style>
@@ -366,9 +386,11 @@
   }
   .content {
     min-width: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     padding: 32px 40px;
   }
+  .offline-banner,
   .broken {
     max-width: 720px;
     margin-bottom: 20px;
@@ -404,6 +426,11 @@
     font-size: 12px;
     text-align: left;
   }
+  @media (max-width: 900px) {
+    .shortcuts {
+      grid-template-columns: auto;
+    }
+  }
   .shortcuts span {
     display: flex;
     align-items: center;
@@ -418,7 +445,15 @@
       grid-template-columns: 200px minmax(220px, 280px) minmax(0, 1fr);
     }
     .content {
-      padding: 24px;
+      padding: 24px 16px;
+    }
+  }
+  @media (max-width: 700px) {
+    .layout {
+      grid-template-columns: 200px minmax(180px, 240px) minmax(0, 1fr);
+    }
+    .content {
+      padding: 20px 12px;
     }
   }
 </style>

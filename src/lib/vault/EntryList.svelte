@@ -12,6 +12,7 @@
     query = $bindable(),
     trashMode,
     searchInput = $bindable(),
+    offline = false,
     onNew,
     onEmptyTrash,
   }: {
@@ -21,6 +22,7 @@
     query: string;
     trashMode: boolean;
     searchInput?: HTMLInputElement;
+    offline?: boolean;
     onNew: () => void;
     onEmptyTrash: () => void;
   } = $props();
@@ -43,9 +45,11 @@
       />
       {#if !query}<kbd>Ctrl F</kbd>{/if}
     </div>
-    <button class="primary new" onclick={onNew} title="{t('new_entry')} (Ctrl+N)" aria-label={t("new_entry")}>
-      <Plus size={16} />
-    </button>
+    {#if !offline}
+      <button class="primary new" onclick={onNew} title="{t('new_entry')} (Ctrl+N)" aria-label={t("new_entry")}>
+        <Plus size={16} />
+      </button>
+    {/if}
   </div>
 
   <div class="head">
@@ -104,7 +108,7 @@
         {:else}
           <Star size={28} strokeWidth={1.5} />
           <p>{t("no_entries")}</p>
-          <button class="sm" onclick={onNew}><Plus size={14} />{t("new_entry")}</button>
+          {#if !offline}<button class="sm" onclick={onNew}><Plus size={14} />{t("new_entry")}</button>{/if}
         {/if}
       </div>
     {/each}
@@ -187,14 +191,17 @@
   }
   .entry {
     width: 100%;
+    min-width: 0;
     height: auto;
     justify-content: flex-start;
     gap: 12px;
     padding: 8px 10px;
     border: none;
+    border-radius: calc(var(--radius) - 2px);
     background: transparent;
     text-align: left;
     font-weight: 400;
+    overflow: hidden;
   }
   .entry:hover:not(:disabled) {
     background: hsl(var(--accent) / 0.6);
@@ -208,6 +215,7 @@
     display: flex;
     flex-direction: column;
     line-height: 1.35;
+    overflow: hidden;
   }
   .label {
     font-weight: 500;

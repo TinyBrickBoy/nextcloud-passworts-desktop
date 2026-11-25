@@ -58,6 +58,8 @@ pub fn t(key: &str) -> &'static str {
         "crypto_encrypt" => ("Encryption failed", "Verschlüsselung fehlgeschlagen"),
         "crypto_missing_key" => ("Key missing from keychain", "Schlüssel fehlt im Schlüsselbund"),
         "crypto_challenge" => ("Invalid challenge", "Ungültige Challenge"),
+        "offline_unavailable" => ("Not available offline", "Offline nicht verfügbar"),
+        "reconnected" => ("Back online", "Wieder online"),
         _ => ("Unknown error", "Unbekannter Fehler"),
     };
     match lang() {

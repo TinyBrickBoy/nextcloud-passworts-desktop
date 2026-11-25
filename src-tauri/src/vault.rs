@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
-use crate::api::{Api, RawFolder, RawPassword, RawTag, BASE_FOLDER};
+use crate::api::{Api, RawFolder, RawPassword, RawTag, RawVaultData, BASE_FOLDER};
+use crate::cache::CachePayload;
 use crate::crypto::{self, Keychain, CSE_TYPE};
 use crate::i18n::t;
 
@@ -64,6 +65,8 @@ pub struct Vault {
     pub tags: Vec<Tag>,
     /// Anzahl der Einträge, die nicht entschlüsselt werden konnten.
     pub broken: usize,
+    /// Nur Lesen: Inhalt stammt aus dem lokalen Cache.
+    pub offline: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -115,6 +118,7 @@ pub struct VaultView {
     pub broken: usize,
     pub encrypted: bool,
     pub lockable: bool,
+    pub offline: bool,
 }
 
 #[derive(Deserialize)]
@@ -249,6 +253,42 @@ fn sort_entries(entries: &mut [Entry]) {
     entries.sort_by_key(|e| e.label.to_lowercase());
 }
 
+/// Entschlüsselter Tresorinhalt samt Anzahl der nicht lesbaren Einträge.
+struct Decrypted {
+    entries: Vec<Entry>,
+    trash: Vec<Entry>,
+    folders: Vec<Folder>,
+    tags: Vec<Tag>,
+    broken: usize,
+}
+
+fn decrypt_all(raw: RawVaultData, keychain: Option<&Keychain>) -> Decrypted {
+    let mut broken = 0;
+    let mut decrypt_list = |list: Vec<RawPassword>| -> Vec<Entry> {
+        let mut entries: Vec<Entry> = list
+            .into_iter()
+            .filter_map(|raw| decrypt_password(raw, keychain).map_err(|_| broken += 1).ok())
+            .collect();
+        sort_entries(&mut entries);
+        entries
+    };
+    let entries = decrypt_list(raw.passwords);
+    let trash = decrypt_list(raw.trashed);
+
+    let mut folders: Vec<Folder> = raw
+        .folders
+        .into_iter()
+        .filter(|f| f.id != BASE_FOLDER)
+        .filter_map(|raw| decrypt_folder(raw, keychain).ok())
+        .collect();
+    folders.sort_by_key(|f| f.label.to_lowercase());
+
+    let mut tags: Vec<Tag> = raw.tags.into_iter().filter_map(|raw| decrypt_tag(raw, keychain).ok()).collect();
+    tags.sort_by_key(|t| t.label.to_lowercase());
+
+    Decrypted { entries, trash, folders, tags, broken }
+}
+
 impl Vault {
     pub fn new(api: Arc<Api>, keychain: Option<Keychain>, lockable: bool) -> Self {
         Self {
@@ -260,47 +300,47 @@ impl Vault {
             folders: Vec::new(),
             tags: Vec::new(),
             broken: 0,
+            offline: false,
         }
     }
 
-    pub async fn refresh(&mut self) -> Result<(), String> {
-        let (passwords, trashed, folders, tags) = tokio::try_join!(
-            self.api.passwords(),
-            self.api.trashed_passwords(),
-            self.api.folders(),
-            self.api.tags()
-        )
-        .map_err(|e| e.to_string())?;
-        let keychain = self.keychain.as_ref();
-
-        let mut broken = 0;
-        let mut decrypt_all = |list: Vec<RawPassword>| -> Vec<Entry> {
-            let mut entries: Vec<Entry> = list
-                .into_iter()
-                .filter_map(|raw| decrypt_password(raw, keychain).map_err(|_| broken += 1).ok())
-                .collect();
-            sort_entries(&mut entries);
-            entries
+    /// Baut einen schreibgeschützten Tresor aus dem Offline Cache.
+    pub fn from_cache(payload: CachePayload, keychain: Option<Keychain>, lockable: bool) -> Result<Vault, String> {
+        // Platzhalter Client: Schreibzugriffe werden über `offline` abgefangen, bevor er benutzt wird.
+        let api = Arc::new(Api::new("http://localhost", "", "").map_err(|e| e.to_string())?);
+        let raw = RawVaultData {
+            passwords: payload.passwords,
+            trashed: payload.trashed,
+            folders: payload.folders,
+            tags: payload.tags,
         };
-        let entries = decrypt_all(passwords);
-        let trash = decrypt_all(trashed);
+        let d = decrypt_all(raw, keychain.as_ref());
+        Ok(Vault {
+            api,
+            keychain,
+            lockable,
+            entries: d.entries,
+            trash: d.trash,
+            folders: d.folders,
+            tags: d.tags,
+            broken: d.broken,
+            offline: true,
+        })
+    }
 
-        let mut folders: Vec<Folder> = folders
-            .into_iter()
-            .filter(|f| f.id != BASE_FOLDER)
-            .filter_map(|raw| decrypt_folder(raw, keychain).ok())
-            .collect();
-        folders.sort_by_key(|f| f.label.to_lowercase());
-
-        let mut tags: Vec<Tag> = tags.into_iter().filter_map(|raw| decrypt_tag(raw, keychain).ok()).collect();
-        tags.sort_by_key(|t| t.label.to_lowercase());
-
-        self.entries = entries;
-        self.trash = trash;
-        self.folders = folders;
-        self.tags = tags;
-        self.broken = broken;
-        Ok(())
+    /// Lädt den Tresor neu. Liefert die Rohdaten für den Cache, offline `None`.
+    pub async fn refresh(&mut self) -> Result<Option<RawVaultData>, String> {
+        if self.offline {
+            return Ok(None);
+        }
+        let raw = self.api.fetch_all().await.map_err(|e| e.to_string())?;
+        let d = decrypt_all(raw.clone(), self.keychain.as_ref());
+        self.entries = d.entries;
+        self.trash = d.trash;
+        self.folders = d.folders;
+        self.tags = d.tags;
+        self.broken = d.broken;
+        Ok(Some(raw))
     }
 
     pub fn view(&self) -> VaultView {
@@ -312,6 +352,7 @@ impl Vault {
             broken: self.broken,
             encrypted: self.keychain.is_some(),
             lockable: self.lockable,
+            offline: self.offline,
         }
     }
 
@@ -369,6 +410,9 @@ impl Vault {
     }
 
     pub async fn save(&mut self, input: SaveInput) -> Result<String, String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         let existing = match &input.id {
             Some(id) => Some(self.entry(id)?),
             None => None,
@@ -428,6 +472,9 @@ impl Vault {
 
     /// Setzt oder entfernt den Favoriten Stern, ohne sonst etwas zu ändern.
     pub async fn set_favorite(&mut self, id: &str, favorite: bool) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         let e = self.entry(id)?;
         let input = SaveInput {
             id: Some(e.id.clone()),
@@ -446,25 +493,37 @@ impl Vault {
 
     /// Verschiebt in den Papierkorb, oder löscht endgültig, wenn der Eintrag schon dort liegt.
     pub async fn delete(&mut self, id: &str) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         let revision = self.entry(id)?.revision.clone();
         self.api.delete_password(id, &revision).await.map_err(|e| e.to_string())?;
-        self.refresh().await
+        self.refresh().await.map(|_| ())
     }
 
     pub async fn restore(&mut self, id: &str) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         self.api.restore_password(id).await.map_err(|e| e.to_string())?;
-        self.refresh().await
+        self.refresh().await.map(|_| ())
     }
 
     pub async fn empty_trash(&mut self) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         let items: Vec<(String, String)> = self.trash.iter().map(|e| (e.id.clone(), e.revision.clone())).collect();
         for (id, revision) in items {
             self.api.delete_password(&id, &revision).await.map_err(|e| e.to_string())?;
         }
-        self.refresh().await
+        self.refresh().await.map(|_| ())
     }
 
     pub async fn create_folder(&mut self, label: &str, parent: Option<String>) -> Result<String, String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         if label.trim().is_empty() {
             return Err(t("name_missing").into());
         }
@@ -479,6 +538,9 @@ impl Vault {
     }
 
     pub async fn rename_folder(&mut self, id: &str, label: &str) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         if label.trim().is_empty() {
             return Err(t("name_missing").into());
         }
@@ -491,17 +553,23 @@ impl Vault {
         });
         self.encrypt_body(&mut body, &["label"])?;
         self.api.update_folder(body).await.map_err(|e| e.to_string())?;
-        self.refresh().await
+        self.refresh().await.map(|_| ())
     }
 
     pub async fn delete_folder(&mut self, id: &str) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         let folder = self.folders.iter().find(|f| f.id == id).ok_or_else(|| t("folder_not_found").to_string())?;
         let revision = folder.revision.clone();
         self.api.delete_folder(id, &revision).await.map_err(|e| e.to_string())?;
-        self.refresh().await
+        self.refresh().await.map(|_| ())
     }
 
     pub async fn create_tag(&mut self, label: &str, color: &str) -> Result<Tag, String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         if label.trim().is_empty() {
             return Err(t("name_missing").into());
         }
@@ -518,9 +586,12 @@ impl Vault {
     }
 
     pub async fn delete_tag(&mut self, id: &str) -> Result<(), String> {
+        if self.offline {
+            return Err(t("offline_unavailable").into());
+        }
         let revision = self.tags.iter().find(|t| t.id == id).map(|t| t.revision.clone()).unwrap_or_default();
         self.api.delete_tag(id, &revision).await.map_err(|e| e.to_string())?;
-        self.refresh().await
+        self.refresh().await.map(|_| ())
     }
 }
 
@@ -547,6 +618,43 @@ mod tests {
             edited: 0,
             created: 0,
         }
+    }
+
+    #[test]
+    fn offline_vault_blocks_writes() {
+        let mut vault = Vault {
+            api: Arc::new(Api::new("https://localhost", "u", "p").unwrap()),
+            keychain: None,
+            lockable: false,
+            entries: vec![],
+            trash: vec![],
+            folders: vec![],
+            tags: vec![],
+            broken: 0,
+            offline: true,
+        };
+        assert!(vault.view().offline);
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let err = rt.block_on(vault.empty_trash()).unwrap_err();
+        assert_eq!(err, t("offline_unavailable"));
+        assert!(rt.block_on(vault.create_folder("x", None)).is_err());
+        assert!(rt.block_on(vault.refresh()).unwrap().is_none());
+    }
+
+    #[test]
+    fn from_cache_is_offline() {
+        let payload = CachePayload {
+            version: 1,
+            timestamp: 0,
+            needs_password: false,
+            keychains: Default::default(),
+            passwords: vec![],
+            trashed: vec![],
+            folders: vec![],
+            tags: vec![],
+        };
+        let vault = Vault::from_cache(payload, None, false).unwrap();
+        assert!(vault.offline && vault.view().offline);
     }
 
     #[test]

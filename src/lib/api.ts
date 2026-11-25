@@ -12,6 +12,9 @@ export interface Settings {
   clipboardSeconds: number;
   favicons: boolean;
   sort: "name" | "edited";
+  offlineCache: boolean;
+  quickUnlock: "off" | "biometric" | "pin";
+  setupDone: boolean;
 }
 
 export interface Status {
@@ -77,6 +80,7 @@ export interface VaultView {
   broken: number;
   encrypted: boolean;
   lockable: boolean;
+  offline: boolean;
 }
 
 export interface FieldInput {
@@ -122,8 +126,12 @@ export const api = {
     invoke<Account>("login_manual", { server, user, appPassword }),
   logout: () => invoke<void>("logout"),
   unlockRequirements: () => invoke<UnlockRequirements>("unlock_requirements"),
-  unlock: (password: string | null, token: { id: string; code: string } | null) =>
-    invoke<VaultView>("unlock", { password, token }),
+  unlock: (password: string | null, token: { id: string; code: string } | null, quickUnlock?: string) =>
+    invoke<VaultView>("unlock", { password, token, quickUnlock: quickUnlock ?? null }),
+  biometricAvailable: () => invoke<boolean>("biometric_available"),
+  setupBiometric: (password: string) => invoke<void>("setup_biometric", { password }),
+  setupPin: (password: string, pin: string) => invoke<void>("setup_pin", { password, pin }),
+  removeQuickUnlock: () => invoke<void>("remove_quick_unlock"),
   lock: () => invoke<void>("lock"),
   refresh: () => invoke<VaultView>("refresh"),
   reveal: (id: string) => invoke<string>("reveal", { id }),
