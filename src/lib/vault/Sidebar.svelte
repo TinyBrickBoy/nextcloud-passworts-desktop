@@ -83,9 +83,11 @@
 
     <div class="heading">
       <span>{t("folders")}</span>
-      <button class="icon small" onclick={onCreateFolder} aria-label={t("new_folder")} title={t("new_folder")}>
-        <Plus size={14} />
-      </button>
+      {#if !offline}
+        <button class="icon small" onclick={onCreateFolder} aria-label={t("new_folder")} title={t("new_folder")}>
+          <Plus size={14} />
+        </button>
+      {/if}
     </div>
     <div class="group">
       {#each vault.folders as folder (folder.id)}
@@ -98,6 +100,7 @@
             <FolderIcon size={16} /><span class="name">{folder.label}</span>
             <span class="count">{folderCount.get(folder.id) ?? ""}</span>
           </button>
+          {#if !offline}
           <span class="actions">
             <button class="icon small" onclick={() => onRenameFolder(folder.id)} aria-label={t("rename")} title={t("rename")}>
               <Pencil size={13} />
@@ -106,6 +109,7 @@
               <X size={14} />
             </button>
           </span>
+          {/if}
         </div>
       {:else}
         <p class="empty">{t("no_folders")}</p>
@@ -114,9 +118,11 @@
 
     <div class="heading">
       <span>{t("tags")}</span>
-      <button class="icon small" onclick={onCreateTag} aria-label={t("new_tag")} title={t("new_tag")}>
-        <Plus size={14} />
-      </button>
+      {#if !offline}
+        <button class="icon small" onclick={onCreateTag} aria-label={t("new_tag")} title={t("new_tag")}>
+          <Plus size={14} />
+        </button>
+      {/if}
     </div>
     <div class="group">
       {#each vault.tags as tag (tag.id)}
@@ -126,11 +132,13 @@
             <span class="name">{tag.label}</span>
             <span class="count">{tagCount.get(tag.id) ?? ""}</span>
           </button>
+          {#if !offline}
           <span class="actions">
             <button class="icon small" onclick={() => onDeleteTag(tag.id)} aria-label={t("delete")} title={t("delete")}>
               <X size={14} />
             </button>
           </span>
+          {/if}
         </div>
       {:else}
         <p class="empty">{t("no_tags")}</p>

@@ -25,6 +25,7 @@
     vault,
     trashMode,
     busy,
+    offline = false,
     onEdit,
     onDelete,
     onRestore,
@@ -34,6 +35,7 @@
     vault: VaultView;
     trashMode: boolean;
     busy: boolean;
+    offline?: boolean;
     onEdit: () => void;
     onDelete: () => void;
     onRestore: () => void;
@@ -131,23 +133,23 @@
     </div>
     <div class="actions">
       {#if trashMode}
-        <button onclick={onRestore} disabled={busy}><RotateCcw size={15} />{t("restore")}</button>
-        <button class="danger" onclick={onDelete} disabled={busy}><Trash2 size={15} />{t("delete_forever")}</button>
+        <button onclick={onRestore} disabled={busy || offline}><RotateCcw size={15} />{t("restore")}</button>
+        <button class="danger" onclick={onDelete} disabled={busy || offline}><Trash2 size={15} />{t("delete_forever")}</button>
       {:else}
         <button
           class="icon fav"
           class:active={entry.favorite}
           onclick={onFavorite}
-          disabled={busy}
+          disabled={busy || offline}
           aria-label={entry.favorite ? t("unfavorite") : t("favorite")}
           title={entry.favorite ? t("unfavorite") : t("favorite")}
         >
           <Star size={17} />
         </button>
         {#if entry.editable}
-          <button onclick={onEdit} title="{t('edit')} (Ctrl+E)"><Pencil size={15} />{t("edit")}</button>
+          <button onclick={onEdit} disabled={offline} title="{t('edit')} (Ctrl+E)"><Pencil size={15} />{t("edit")}</button>
         {/if}
-        <button class="icon" onclick={onDelete} disabled={busy} aria-label={t("move_to_trash")} title={t("move_to_trash")}>
+        <button class="icon" onclick={onDelete} disabled={busy || offline} aria-label={t("move_to_trash")} title={t("move_to_trash")}>
           <Trash2 size={16} />
         </button>
       {/if}

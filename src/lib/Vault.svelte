@@ -143,6 +143,7 @@
   }
 
   async function createFolder() {
+    if (vault.offline) return;
     const label = await promptDialog({ title: t("new_folder"), confirmLabel: t("create"), placeholder: t("folder_name") });
     if (!label) return;
     const result = await run(() => api.createFolder(label, null), t("folder_created"));
@@ -153,6 +154,7 @@
   }
 
   async function renameFolder(id: string) {
+    if (vault.offline) return;
     const folder = vault.folders.find((f) => f.id === id);
     const label = await promptDialog({ title: t("rename_folder"), confirmLabel: t("save"), value: folder?.label });
     if (!label || label === folder?.label) return;
@@ -161,6 +163,7 @@
   }
 
   async function deleteFolder(id: string) {
+    if (vault.offline) return;
     const folder = vault.folders.find((f) => f.id === id);
     const ok = await confirmDialog({
       title: t("delete_folder_title"),
@@ -177,6 +180,7 @@
   }
 
   async function createTag(): Promise<string | null> {
+    if (vault.offline) return null;
     const label = await promptDialog({ title: t("new_tag"), confirmLabel: t("create"), placeholder: t("tag_name") });
     if (!label) return null;
     const color = TAG_COLORS[vault.tags.length % TAG_COLORS.length];
@@ -187,6 +191,7 @@
   }
 
   async function deleteTag(id: string) {
+    if (vault.offline) return;
     const tag = vault.tags.find((x) => x.id === id);
     const ok = await confirmDialog({
       title: t("delete_tag_title"),
@@ -343,7 +348,8 @@
         entry={selected}
         {vault}
         {trashMode}
-        busy={busy || vault.offline}
+        {busy}
+        offline={vault.offline}
         onEdit={() => (mode = "edit")}
         onDelete={deleteSelected}
         onRestore={restoreSelected}
