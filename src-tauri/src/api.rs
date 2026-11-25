@@ -48,6 +48,15 @@ struct ErrorBody {
     message: Option<String>,
 }
 
+/// Unentschlüsselter Tresorinhalt, wie ihn der Server liefert (Grundlage für den Offline Cache).
+#[derive(Clone)]
+pub struct RawVaultData {
+    pub passwords: Vec<RawPassword>,
+    pub trashed: Vec<RawPassword>,
+    pub folders: Vec<RawFolder>,
+    pub tags: Vec<RawTag>,
+}
+
 pub struct Api {
     http: reqwest::Client,
     base: String,
@@ -128,6 +137,12 @@ impl Api {
 
     pub async fn keepalive(&self) -> Result<(), ApiError> {
         self.call::<Value>(Method::GET, "session/keepalive", None).await.map(|_| ())
+    }
+
+    pub async fn fetch_all(&self) -> Result<RawVaultData, ApiError> {
+        let (passwords, trashed, folders, tags) =
+            tokio::try_join!(self.passwords(), self.trashed_passwords(), self.folders(), self.tags())?;
+        Ok(RawVaultData { passwords, trashed, folders, tags })
     }
 
     pub async fn passwords(&self) -> Result<Vec<RawPassword>, ApiError> {
@@ -296,7 +311,7 @@ mod tests {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RawPassword {
     pub id: String,
@@ -358,7 +373,7 @@ where
         .collect())
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RawTag {
     pub id: String,
@@ -374,7 +389,7 @@ pub struct RawTag {
     pub cse_key: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RawFolder {
     pub id: String,
