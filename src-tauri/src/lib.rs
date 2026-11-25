@@ -425,8 +425,8 @@ async fn unlock(
             Ok(view)
         }
         Err(e) if e.network => {
-            // Offline: bei fehlendem oder kaputtem Cache die urspruengliche Netzwerkmeldung zeigen.
-            let vault = unlock_offline(&state, &password).await.map_err(|_| e.message)?;
+            // Offline: Fehler des Offline-Entsperrens unveraendert weiterreichen.
+            let vault = unlock_offline(&state, &password).await?;
             let view = vault.view();
             state.stop_keepalive();
             *state.cache_meta.lock().unwrap() = None;

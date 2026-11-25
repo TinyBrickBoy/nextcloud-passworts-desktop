@@ -49,7 +49,7 @@ impl Default for Settings {
             sort: "name".into(),
             offline_cache: false,
             quick_unlock: "off".into(),
-            setup_done: true,
+            setup_done: false,
         }
     }
 }

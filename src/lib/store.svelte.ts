@@ -10,7 +10,7 @@ export const defaultSettings: Settings = {
   sort: "name",
   offlineCache: false,
   quickUnlock: "off",
-  setupDone: true,
+  setupDone: false,
 };
 
 export const ui = $state({
