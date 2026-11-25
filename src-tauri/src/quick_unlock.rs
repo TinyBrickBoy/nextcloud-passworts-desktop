@@ -13,6 +13,8 @@ const ATTEMPTS_FILE: &str = "pin_attempts.json";
 const MAX_ATTEMPTS: u32 = 5;
 const SALT_LEN: usize = 16;
 const BIOMETRIC_SERVICE: &str = "nextcloud-passwords-desktop:encryption";
+#[cfg(target_os = "linux")]
+const POLKIT_ACTION: &str = "de.tinybrickboy.ncpasswords.unlock";
 
 fn read_attempts(dir: &Path) -> u32 {
     fs::read(dir.join(ATTEMPTS_FILE))
@@ -87,11 +89,23 @@ pub fn is_biometric_available() -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        match keyring::Entry::new(BIOMETRIC_SERVICE, "availability-check") {
-            // NoEntry bedeutet: Dienst erreichbar, nur kein Eintrag vorhanden.
+        // Pruefe ob polkit und der Keyring erreichbar sind.
+        let keyring_ok = match keyring::Entry::new(BIOMETRIC_SERVICE, "availability-check") {
             Ok(entry) => matches!(entry.get_password(), Ok(_) | Err(keyring::Error::NoEntry)),
             Err(_) => false,
+        };
+        if !keyring_ok {
+            return false;
         }
+        // Pruefe ob die polkit-Action registriert ist.
+        std::process::Command::new("pkaction")
+            .arg("--action-id")
+            .arg(POLKIT_ACTION)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
@@ -104,7 +118,27 @@ pub fn store_biometric(server: &str, user: &str, password: &str) -> Result<(), S
 }
 
 pub fn retrieve_biometric(server: &str, user: &str) -> Result<Zeroizing<String>, String> {
+    #[cfg(target_os = "linux")]
+    polkit_authenticate()?;
     biometric_entry(server, user)?.get_password().map(Zeroizing::new).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn polkit_authenticate() -> Result<(), String> {
+    let pid = std::process::id();
+    let output = std::process::Command::new("pkcheck")
+        .args([
+            "--action-id", POLKIT_ACTION,
+            "--process", &pid.to_string(),
+            "--allow-user-interaction",
+        ])
+        .output()
+        .map_err(|e| format!("polkit: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("Biometric authentication failed".into())
+    }
 }
 
 pub fn remove_biometric(server: &str, user: &str) {
