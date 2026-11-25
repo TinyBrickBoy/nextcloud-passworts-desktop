@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { LoaderCircle, LockKeyholeOpen, Eye, EyeOff } from "@lucide/svelte";
+  import { LoaderCircle, LockKeyholeOpen, Eye, EyeOff, Fingerprint } from "@lucide/svelte";
   import { api, errorText, type Account, type UnlockRequirements, type VaultView } from "./api";
   import { t } from "./i18n.svelte";
   import AuthShell from "./components/AuthShell.svelte";
+  import { ui } from "./store.svelte";
 
   let {
     account,
@@ -19,6 +20,15 @@
   let busy = $state(false);
   let error = $state("");
   let passwordInput = $state<HTMLInputElement>();
+  let pin = $state("");
+  let showPin = $state(false);
+  let pinInput = $state<HTMLInputElement>();
+  // PIN-Eingabe aktiv, bis der Nutzer auf das Passwort wechselt oder die PIN fehlschlägt.
+  let pinMode = $state(true);
+
+  const quick = $derived(ui.settings.quickUnlock);
+  const usePin = $derived(!!req?.needsPassword && quick === "pin" && pinMode);
+  const pinValid = $derived(/^\d{4,8}$/.test(pin));
 
   const host = $derived(account.server.replace(/^https?:\/\//, ""));
   const needsInput = $derived(!!req && (req.needsPassword || req.tokens.length > 0));
@@ -41,7 +51,7 @@
     } finally {
       busy = false;
     }
-    queueMicrotask(() => passwordInput?.focus());
+    queueMicrotask(() => (usePin ? pinInput : passwordInput)?.focus());
   }
 
   async function submit(e: SubmitEvent) {
@@ -49,21 +59,75 @@
     if (!req) return;
     error = "";
     busy = true;
+    const viaPin = usePin;
     try {
       const token = req.tokens.length ? { id: tokenId, code } : null;
-      onUnlocked(await api.unlock(req.needsPassword ? password : null, token));
-      password = "";
+      if (viaPin) {
+        onUnlocked(await api.unlock(null, token, pin));
+        pin = "";
+      } else {
+        onUnlocked(await api.unlock(req.needsPassword ? password : null, token));
+        password = "";
+      }
     } catch (err) {
       error = errorText(err);
       busy = false;
+      if (viaPin) {
+        pin = "";
+        pinMode = false;
+      }
       queueMicrotask(() => passwordInput?.select());
     }
+  }
+
+  async function unlockBiometric() {
+    if (!req) return;
+    error = "";
+    busy = true;
+    try {
+      const token = req.tokens.length ? { id: tokenId, code } : null;
+      onUnlocked(await api.unlock(null, token, "biometric"));
+    } catch (err) {
+      error = errorText(err);
+      busy = false;
+      queueMicrotask(() => passwordInput?.focus());
+    }
+  }
+
+  function usePassword() {
+    pinMode = false;
+    pin = "";
+    error = "";
+    queueMicrotask(() => passwordInput?.focus());
   }
 </script>
 
 <AuthShell title={needsInput ? t("locked_title") : t("opening")} subtitle="{account.user} · {host}">
   <form onsubmit={submit}>
-    {#if req?.needsPassword}
+    {#if usePin}
+      <div>
+        <label for="pin">{t("pin_unlock")}</label>
+        <div class="password">
+          <input
+            id="pin"
+            type={showPin ? "text" : "password"}
+            bind:this={pinInput}
+            bind:value={pin}
+            disabled={busy}
+            required
+            inputmode="numeric"
+            minlength={4}
+            maxlength={8}
+            autocomplete="off"
+            class="mono"
+          />
+          <button type="button" class="icon" onclick={() => (showPin = !showPin)} aria-label={showPin ? t("hide") : t("show")}>
+            {#if showPin}<EyeOff size={16} />{:else}<Eye size={16} />{/if}
+          </button>
+        </div>
+        <button type="button" class="ghost link" onclick={usePassword} disabled={busy}>{t("use_password")}</button>
+      </div>
+    {:else if req?.needsPassword}
       <div>
         <label for="pw">{t("encryption_password")}</label>
         <div class="password">
@@ -110,9 +174,14 @@
     {#if !req && !error}
       <div class="waiting"><LoaderCircle size={16} class="spin" /><span>{t("connecting")}</span></div>
     {:else if needsInput}
-      <button class="primary" type="submit" disabled={busy}>
+      <button class="primary" type="submit" disabled={busy || (usePin && !pinValid)}>
         {#if busy}<LoaderCircle size={16} class="spin" />{t("unlocking")}{:else}<LockKeyholeOpen size={16} />{t("unlock")}{/if}
       </button>
+      {#if req?.needsPassword && quick === "biometric"}
+        <button type="button" onclick={unlockBiometric} disabled={busy}>
+          <Fingerprint size={16} />{t("biometric_unlock")}
+        </button>
+      {/if}
     {:else if busy}
       <div class="waiting"><LoaderCircle size={16} class="spin" /><span>{t("loading_vault")}</span></div>
     {:else}
@@ -150,6 +219,13 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+  }
+  .link {
+    margin-top: 6px;
+    padding: 0;
+    height: auto;
     font-size: 13px;
     color: hsl(var(--muted-foreground));
   }

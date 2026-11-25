@@ -375,7 +375,7 @@
 </div>
 
 {#if showSettings}
-  <SettingsDialog {account} lockable={vault.lockable} onClose={() => (showSettings = false)} />
+  <SettingsDialog {account} lockable={vault.lockable} encrypted={vault.encrypted} onClose={() => (showSettings = false)} />
 {/if}
 
 <style>
