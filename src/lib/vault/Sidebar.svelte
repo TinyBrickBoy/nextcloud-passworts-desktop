@@ -21,6 +21,7 @@
     account,
     filter = $bindable(),
     busy,
+    offline,
     onCreateFolder,
     onRenameFolder,
     onDeleteFolder,
@@ -35,6 +36,7 @@
     account: Account;
     filter: string;
     busy: boolean;
+    offline: boolean;
     onCreateFolder: () => void;
     onRenameFolder: (id: string) => void;
     onDeleteFolder: (id: string) => void;
@@ -145,7 +147,10 @@
       </div>
     </div>
     <div class="tools">
-      <button class="icon" onclick={onRefresh} disabled={busy} aria-label={t("refresh")} title={t("refresh")}>
+      <button class="icon" onclick={onRefresh}
+        disabled={busy}
+        aria-label={offline ? t("reconnect") : t("refresh")}
+        title={offline ? t("reconnect") : t("refresh")}>
         <RefreshCw size={16} class={busy ? "spin" : ""} />
       </button>
       <button class="icon" onclick={onSettings} aria-label={t("settings")} title="{t('settings')} (Ctrl+,)">

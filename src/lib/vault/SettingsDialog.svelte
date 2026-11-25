@@ -70,6 +70,13 @@
       <h3>{t("security")}</h3>
       <div class="setting">
         <div class="text">
+          <span>{t("offline_cache")}</span>
+          <small class="muted">{t("offline_cache_hint")}</small>
+        </div>
+        <input type="checkbox" checked={ui.settings.offlineCache} onchange={(e) => saveSettings({ offlineCache: e.currentTarget.checked })} />
+      </div>
+      <div class="setting">
+        <div class="text">
           <span>{t("auto_lock")}</span>
           <small class="muted">{lockable ? t("auto_lock_hint") : t("auto_lock_unavailable")}</small>
         </div>

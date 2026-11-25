@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { KeyRound, TriangleAlert } from "@lucide/svelte";
+  import { KeyRound, TriangleAlert, WifiOff } from "@lucide/svelte";
   import { api, errorText, type Account, type Entry, type VaultView } from "./api";
   import { t } from "./i18n.svelte";
   import { confirmDialog, promptDialog, toast, ui } from "./store.svelte";
@@ -87,12 +87,16 @@
   }
 
   async function refresh() {
+    if (vault.offline) {
+      onLock();
+      return;
+    }
     const v = await run(() => api.refresh(), t("refreshed"));
     if (v) vault = v;
   }
 
   async function deleteSelected() {
-    if (!selected) return;
+    if (!selected || vault.offline) return;
     const forever = trashMode;
     const ok = await confirmDialog({
       title: forever ? t("delete_forever_title") : t("move_to_trash_title"),
@@ -111,7 +115,7 @@
   }
 
   async function restoreSelected() {
-    if (!selected) return;
+    if (!selected || vault.offline) return;
     const v = await run(() => api.restore(selected.id), t("restored"));
     if (v) {
       vault = v;
@@ -120,6 +124,7 @@
   }
 
   async function emptyTrash() {
+    if (vault.offline) return;
     const ok = await confirmDialog({
       title: t("empty_trash_title"),
       message: t("empty_trash_message", { n: vault.trash.length }),
@@ -132,7 +137,7 @@
   }
 
   async function toggleFavorite() {
-    if (!selected) return;
+    if (!selected || vault.offline) return;
     const v = await run(() => api.setFavorite(selected.id, !selected.favorite));
     if (v) vault = v;
   }
@@ -198,6 +203,7 @@
   }
 
   function newEntry() {
+    if (vault.offline) return;
     if (trashMode || filter === "security") filter = "all";
     mode = "new";
   }
@@ -229,7 +235,7 @@
       e.preventDefault();
       searchInput?.focus();
       searchInput?.select();
-    } else if (mod && key === "n") {
+    } else if (mod && key === "n" && !vault.offline) {
       e.preventDefault();
       newEntry();
     } else if (mod && key === "l" && vault.lockable) {
@@ -238,7 +244,7 @@
     } else if (mod && key === ",") {
       e.preventDefault();
       showSettings = true;
-    } else if (mod && key === "e" && selected?.editable && !trashMode) {
+    } else if (mod && key === "e" && selected?.editable && !trashMode && !vault.offline) {
       e.preventDefault();
       mode = "edit";
     } else if (mod && key === "c" && selected && (!inField || target === searchInput) && !window.getSelection()?.toString()) {
@@ -247,7 +253,7 @@
     } else if (mod && key === "b" && selected) {
       e.preventDefault();
       detail?.copy("username");
-    } else if (key === "delete" && selected && !inField) {
+    } else if (key === "delete" && selected && !inField && !vault.offline) {
       e.preventDefault();
       deleteSelected();
     } else if (e.key === "ArrowDown" && (!inField || target === searchInput)) {
@@ -274,6 +280,7 @@
     {account}
     bind:filter
     {busy}
+    offline={vault.offline}
     onCreateFolder={createFolder}
     onRenameFolder={renameFolder}
     onDeleteFolder={deleteFolder}
@@ -300,11 +307,18 @@
     bind:query
     bind:searchInput
     {trashMode}
+    offline={vault.offline}
     onNew={newEntry}
     onEmptyTrash={emptyTrash}
   />
 
   <main class="content">
+    {#if vault.offline}
+      <div class="alert info offline-banner">
+        <WifiOff size={16} /><span>{t("offline_banner")}</span>
+      </div>
+    {/if}
+
     {#if vault.broken > 0}
       <div class="alert warn broken">
         <TriangleAlert size={16} /><span>{t("broken_entries", { n: vault.broken })}</span>
@@ -329,7 +343,7 @@
         entry={selected}
         {vault}
         {trashMode}
-        {busy}
+        busy={busy || vault.offline}
         onEdit={() => (mode = "edit")}
         onDelete={deleteSelected}
         onRestore={restoreSelected}
@@ -369,6 +383,7 @@
     overflow-y: auto;
     padding: 32px 40px;
   }
+  .offline-banner,
   .broken {
     max-width: 720px;
     margin-bottom: 20px;
