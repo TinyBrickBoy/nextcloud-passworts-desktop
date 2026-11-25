@@ -296,7 +296,7 @@ mod tests {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawPassword {
     pub id: String,
@@ -358,7 +358,7 @@ where
         .collect())
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawTag {
     pub id: String,
@@ -374,7 +374,7 @@ pub struct RawTag {
     pub cse_key: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawFolder {
     pub id: String,

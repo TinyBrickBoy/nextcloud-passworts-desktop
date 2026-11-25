@@ -19,6 +19,19 @@ pub struct Settings {
     pub favicons: bool,
     /// Sortierung der Liste: "name" oder "edited"
     pub sort: String,
+    /// Verschlüsselte Kopie des Tresors lokal vorhalten
+    #[serde(default)]
+    pub offline_cache: bool,
+    /// Schnellentsperren: "off", "biometric" oder "pin"
+    #[serde(default)]
+    pub quick_unlock: String,
+    /// Einrichtungsassistent abgeschlossen (Bestandsnutzer überspringen ihn)
+    #[serde(default = "default_true")]
+    pub setup_done: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -30,6 +43,9 @@ impl Default for Settings {
             clipboard_seconds: 30,
             favicons: true,
             sort: "name".into(),
+            offline_cache: false,
+            quick_unlock: "off".into(),
+            setup_done: true,
         }
     }
 }

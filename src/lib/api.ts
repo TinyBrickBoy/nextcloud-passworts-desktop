@@ -12,6 +12,9 @@ export interface Settings {
   clipboardSeconds: number;
   favicons: boolean;
   sort: "name" | "edited";
+  offlineCache: boolean;
+  quickUnlock: "off" | "biometric" | "pin";
+  setupDone: boolean;
 }
 
 export interface Status {
