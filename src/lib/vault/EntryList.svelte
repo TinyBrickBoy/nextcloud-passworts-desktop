@@ -191,14 +191,17 @@
   }
   .entry {
     width: 100%;
+    min-width: 0;
     height: auto;
     justify-content: flex-start;
     gap: 12px;
     padding: 8px 10px;
     border: none;
+    border-radius: calc(var(--radius) - 2px);
     background: transparent;
     text-align: left;
     font-weight: 400;
+    overflow: hidden;
   }
   .entry:hover:not(:disabled) {
     background: hsl(var(--accent) / 0.6);
@@ -212,6 +215,7 @@
     display: flex;
     flex-direction: column;
     line-height: 1.35;
+    overflow: hidden;
   }
   .label {
     font-weight: 500;

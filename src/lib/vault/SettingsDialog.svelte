@@ -105,6 +105,7 @@
       <button class="icon" onclick={onClose} aria-label={t("close")}><X size={18} /></button>
     </header>
 
+    <div class="scroll">
     <section>
       <h3>{t("appearance")}</h3>
       <div class="setting">
@@ -261,6 +262,7 @@
     </section>
 
     <footer class="muted">Passwords Desktop · {t("about_text")}</footer>
+    </div>
   </div>
 </div>
 
@@ -279,19 +281,26 @@
     width: 100%;
     max-width: 520px;
     max-height: 100%;
-    overflow-y: auto;
-    padding: 8px 24px 20px;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
     box-shadow: var(--shadow-lg);
   }
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 0 4px;
+    padding: 16px 24px 12px;
+    border-bottom: 1px solid hsl(var(--border));
+    flex: none;
   }
   h2 {
     font-size: 18px;
     font-weight: 600;
+  }
+  .scroll {
+    overflow-y: auto;
+    padding: 0 24px 20px;
   }
   section {
     padding: 12px 0;

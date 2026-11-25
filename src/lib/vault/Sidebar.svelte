@@ -247,11 +247,17 @@
     font-variant-numeric: tabular-nums;
   }
   .count.warn {
-    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 1px 6px 0;
     border-radius: 999px;
     color: hsl(var(--warning));
     background: hsl(var(--warning) / 0.12);
     font-weight: 600;
+    line-height: 1;
   }
   .actions {
     position: absolute;
@@ -326,5 +332,11 @@
   .tools {
     display: flex;
     justify-content: space-between;
+  }
+  .tools :global(button) {
+    color: hsl(var(--foreground) / 0.6);
+  }
+  .tools :global(button:hover:not(:disabled)) {
+    color: hsl(var(--foreground));
   }
 </style>
