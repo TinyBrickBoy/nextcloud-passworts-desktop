@@ -67,7 +67,7 @@ fn decode(value: &str) -> Result<Vec<u8>, CryptoError> {
         .map_err(|_| CryptoError::Encoding)
 }
 
-fn pwhash(password: &[u8], salt: &[u8]) -> Result<Zeroizing<[u8; BOX_SEEDBYTES]>, CryptoError> {
+pub(crate) fn pwhash(password: &[u8], salt: &[u8]) -> Result<Zeroizing<[u8; BOX_SEEDBYTES]>, CryptoError> {
     let params = Params::new(
         PWHASH_MEMLIMIT_INTERACTIVE_KIB,
         PWHASH_OPSLIMIT_INTERACTIVE,
@@ -82,7 +82,7 @@ fn pwhash(password: &[u8], salt: &[u8]) -> Result<Zeroizing<[u8; BOX_SEEDBYTES]>
     Ok(out)
 }
 
-fn secretbox_open(data: &[u8], key: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+pub(crate) fn secretbox_open(data: &[u8], key: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     if data.len() < SECRETBOX_NONCEBYTES + SECRETBOX_MACBYTES || key.len() != SECRETBOX_KEYBYTES {
         return Err(CryptoError::Decrypt);
     }
@@ -94,7 +94,7 @@ fn secretbox_open(data: &[u8], key: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoE
 }
 
 /// Liefert `nonce + secretbox(message)`.
-fn secretbox_seal(message: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+pub(crate) fn secretbox_seal(message: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if key.len() != SECRETBOX_KEYBYTES {
         return Err(CryptoError::Encrypt);
     }

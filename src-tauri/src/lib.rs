@@ -1,5 +1,6 @@
 pub mod account;
 pub mod api;
+pub mod cache;
 pub mod clipboard;
 pub mod crypto;
 pub mod generator;
